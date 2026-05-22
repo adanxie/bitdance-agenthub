@@ -1,7 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 
-import { and, desc, eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { MessagePart } from '@/shared/types'
@@ -104,6 +104,72 @@ export async function listMessages(conversationId: string) {
     where: eq(schema.messages.conversationId, conversationId),
     orderBy: [schema.messages.createdAt],
   })
+}
+
+// ─── 删除会话 ────────────────────────────────────────────
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.conversationId, conversationId),
+  })
+
+  // 删 DB：依赖 cascade 级联清理 messages / artifacts / workspaces / agent_runs
+  const deleted = await db
+    .delete(schema.conversations)
+    .where(eq(schema.conversations.id, conversationId))
+    .returning({ id: schema.conversations.id })
+
+  if (deleted.length === 0) {
+    throw new Error(`Conversation not found: ${conversationId}`)
+  }
+
+  // 物理删 workspace 目录（不影响 DB 事务，容错）
+  if (workspace) {
+    try {
+      rmSync(workspace.rootPath, { recursive: true, force: true })
+    } catch (err) {
+      console.warn(`[deleteConversation] failed to remove workspace dir ${workspace.rootPath}`, err)
+    }
+  }
+}
+
+// ─── 添加 Agent 到现有会话 ──────────────────────────────
+export interface AddAgentsArgs {
+  conversationId: string
+  agentIds: string[]
+}
+
+export async function addAgentsToConversation(args: AddAgentsArgs) {
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, args.conversationId),
+  })
+  if (!conv) throw new Error(`Conversation not found: ${args.conversationId}`)
+
+  // 校验新 agent 存在
+  const found = await db.query.agents.findMany({
+    where: (a, { inArray }) => inArray(a.id, args.agentIds),
+  })
+  if (found.length !== args.agentIds.length) {
+    const foundSet = new Set(found.map((a) => a.id))
+    const missing = args.agentIds.filter((id) => !foundSet.has(id))
+    throw new Error(`Agents not found: ${missing.join(', ')}`)
+  }
+
+  // 去重合并
+  const merged = Array.from(new Set([...conv.agentIds, ...args.agentIds]))
+  const newMode = merged.length >= 2 ? 'group' : 'single'
+
+  const now = Date.now()
+  await db
+    .update(schema.conversations)
+    .set({ agentIds: merged, mode: newMode, updatedAt: now })
+    .where(eq(schema.conversations.id, args.conversationId))
+
+  return {
+    ...conv,
+    agentIds: merged,
+    mode: newMode,
+    updatedAt: now,
+  }
 }
 
 // ─── 发消息 ──────────────────────────────────────────────

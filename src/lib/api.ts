@@ -40,6 +40,26 @@ export async function createConversation(body: CreateConversationBody): Promise<
   return conversation
 }
 
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' }),
+  )
+}
+
+export async function addAgentsToConversation(
+  conversationId: string,
+  addAgentIds: string[],
+): Promise<ConversationRow> {
+  const { conversation } = await json<{ conversation: ConversationRow }>(
+    fetch(`/api/conversations/${conversationId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addAgentIds }),
+    }),
+  )
+  return conversation
+}
+
 // ─── Messages ───────────────────────────────────
 export async function fetchMessages(conversationId: string): Promise<MessageRow[]> {
   const { messages } = await json<{ messages: MessageRow[] }>(

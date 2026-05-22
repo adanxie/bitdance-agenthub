@@ -1,13 +1,21 @@
 'use client'
 
-import { PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { NewConversationDialog } from '@/components/new-conversation-dialog'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { fetchAgents, fetchConversations } from '@/lib/api'
+import { deleteConversation as deleteConversationAPI, fetchAgents, fetchConversations } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAppStore, useConversationList } from '@/stores/app-store'
 
@@ -18,14 +26,33 @@ export function Sidebar() {
   const setConversations = useAppStore((s) => s.setConversations)
   const setAgents = useAppStore((s) => s.setAgents)
   const agents = useAppStore((s) => s.agents)
+  const removeConversation = useAppStore((s) => s.removeConversation)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchConversations().then(setConversations).catch(console.error)
     fetchAgents().then(setAgents).catch(console.error)
   }, [setConversations, setAgents])
+
+  const deleteTarget = deleteTargetId ? conversations.find((c) => c.id === deleteTargetId) : null
+
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return
+    setDeleting(true)
+    try {
+      await deleteConversationAPI(deleteTargetId)
+      removeConversation(deleteTargetId)
+      setDeleteTargetId(null)
+    } catch (err) {
+      console.error('[Sidebar] delete failed', err)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <aside
@@ -116,33 +143,72 @@ export function Sidebar() {
                 }
 
                 return (
-                  <button
+                  <div
                     key={c.id}
-                    type="button"
-                    onClick={() => setActive(c.id)}
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition hover:bg-accent',
+                      'group flex w-full items-center gap-3 rounded-md px-2 py-2 transition hover:bg-accent',
                       isActive && 'bg-accent',
                     )}
                   >
-                    <Avatar className="size-9 shrink-0">
-                      <AvatarFallback className="text-sm">
-                        {firstAgent?.avatar ?? '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{c.title}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {c.mode === 'single' ? '单聊' : '群聊'} · {c.agentIds.length} 位 Agent
+                    <button
+                      type="button"
+                      onClick={() => setActive(c.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <Avatar className="size-9 shrink-0">
+                        <AvatarFallback className="text-sm">
+                          {firstAgent?.avatar ?? '?'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{c.title}</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {c.mode === 'single' ? '单聊' : '群聊'} · {c.agentIds.length} 位 Agent
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeleteTargetId(c.id)
+                      }}
+                      title="删除会话"
+                      className="opacity-0 transition group-hover:opacity-100 hover:text-red-600"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
                 )
               })}
         </div>
       </ScrollArea>
 
       <NewConversationDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+
+      <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+            <DialogDescription>
+              确定要删除「{deleteTarget?.title}」吗？该会话的所有消息、产物和工作区都会一并清除，无法恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+              取消
+            </Button>
+            <Button
+              variant="default"
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => void confirmDelete()}
+              disabled={deleting}
+            >
+              {deleting ? '删除中...' : '删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

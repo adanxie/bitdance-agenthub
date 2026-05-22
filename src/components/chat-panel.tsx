@@ -1,7 +1,12 @@
 'use client'
 
+import { UserPlus } from 'lucide-react'
+import { useState } from 'react'
+
+import { AddAgentDialog } from '@/components/add-agent-dialog'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { MessageInput } from '@/components/message-input'
 import { MessageList } from '@/components/message-list'
 import { useActiveConversation, useAppStore } from '@/stores/app-store'
@@ -10,6 +15,7 @@ export function ChatPanel() {
   const conv = useActiveConversation()
   const agents = useAppStore((s) => s.agents)
   const streamConnected = useAppStore((s) => s.streamConnected)
+  const [addOpen, setAddOpen] = useState(false)
 
   if (!conv) {
     return (
@@ -42,16 +48,33 @@ export function ChatPanel() {
             </div>
           </div>
         </div>
-        <Badge variant={streamConnected ? 'default' : 'outline'} className="shrink-0 gap-1.5">
-          <span
-            className={`size-1.5 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-zinc-400'}`}
-          />
-          {streamConnected ? '已连接' : '断开'}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setAddOpen(true)}
+            title="添加 Agent"
+          >
+            <UserPlus className="size-4" />
+          </Button>
+          <Badge variant={streamConnected ? 'default' : 'outline'} className="gap-1.5">
+            <span
+              className={`size-1.5 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-zinc-400'}`}
+            />
+            {streamConnected ? '已连接' : '断开'}
+          </Badge>
+        </div>
       </header>
 
       <MessageList conversationId={conv.id} />
       <MessageInput conversationId={conv.id} />
+
+      <AddAgentDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        conversationId={conv.id}
+        existingAgentIds={conv.agentIds}
+      />
     </main>
   )
 }
