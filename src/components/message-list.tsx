@@ -39,14 +39,14 @@ export function MessageList({ conversationId }: { conversationId: string }) {
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
         还没有消息，发一条试试。
       </div>
     )
   }
 
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="min-h-0 flex-1">
       <div ref={containerRef} className="space-y-4 p-4">
         {messages.map((m) => (
           <MessageItem key={m.id} message={m} />

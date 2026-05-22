@@ -13,7 +13,7 @@ export function ChatPanel() {
 
   if (!conv) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-background">
+      <main className="flex min-w-0 flex-1 items-center justify-center bg-background">
         <div className="space-y-3 text-center text-muted-foreground">
           <div className="text-5xl">💬</div>
           <div className="text-sm">选择左侧会话开始聊天，或新建一个</div>
@@ -25,24 +25,24 @@ export function ChatPanel() {
   const participantAgents = conv.agentIds.map((id) => agents[id]).filter(Boolean)
 
   return (
-    <main className="flex flex-1 flex-col bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex -space-x-2">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <header className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex shrink-0 -space-x-2">
             {participantAgents.map((a) => (
               <Avatar key={a.id} className="size-8 border-2 border-background">
                 <AvatarFallback className="text-sm">{a.avatar}</AvatarFallback>
               </Avatar>
             ))}
           </div>
-          <div>
-            <div className="text-sm font-medium">{conv.title}</div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{conv.title}</div>
             <div className="text-xs text-muted-foreground">
               {conv.mode === 'single' ? '单聊' : '群聊'} · {participantAgents.length} 位 Agent
             </div>
           </div>
         </div>
-        <Badge variant={streamConnected ? 'default' : 'outline'} className="gap-1.5">
+        <Badge variant={streamConnected ? 'default' : 'outline'} className="shrink-0 gap-1.5">
           <span
             className={`size-1.5 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-zinc-400'}`}
           />
