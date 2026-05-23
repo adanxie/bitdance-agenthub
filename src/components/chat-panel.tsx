@@ -1,10 +1,11 @@
 'use client'
 
-import { MessagesSquare, UserPlus } from 'lucide-react'
+import { FolderOpen, MessagesSquare, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
 import { AgentAvatar } from '@/components/agent-avatar'
+import { FileLibraryDialog } from '@/components/file-library-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MessageInput } from '@/components/message-input'
@@ -16,6 +17,7 @@ export function ChatPanel() {
   const agents = useAppStore((s) => s.agents)
   const streamConnected = useAppStore((s) => s.streamConnected)
   const [addOpen, setAddOpen] = useState(false)
+  const [filesOpen, setFilesOpen] = useState(false)
 
   if (!conv) {
     return (
@@ -57,6 +59,14 @@ export function ChatPanel() {
           <Button
             size="icon"
             variant="ghost"
+            onClick={() => setFilesOpen(true)}
+            title="会话文件库"
+          >
+            <FolderOpen className="size-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
             onClick={() => setAddOpen(true)}
             title="添加 Agent"
           >
@@ -79,6 +89,12 @@ export function ChatPanel() {
         onOpenChange={setAddOpen}
         conversationId={conv.id}
         existingAgentIds={conv.agentIds}
+      />
+
+      <FileLibraryDialog
+        open={filesOpen}
+        onOpenChange={setFilesOpen}
+        conversationId={conv.id}
       />
     </main>
   )
