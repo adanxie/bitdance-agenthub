@@ -108,13 +108,24 @@ function CodePart({ language, content }: { language: string; content: string }) 
   }
 
   return (
-    <div className="group relative overflow-hidden rounded-md border bg-zinc-950 text-zinc-100">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5 text-xs">
-        <span className="font-mono text-zinc-400">{language || 'text'}</span>
+    <div className={cn(
+      'group relative overflow-hidden rounded-md border',
+      'border-zinc-200 bg-zinc-50 text-zinc-900',
+      'dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100',
+    )}>
+      <div className={cn(
+        'flex items-center justify-between border-b px-3 py-1.5 text-xs',
+        'border-zinc-200 dark:border-zinc-800',
+      )}>
+        <span className="font-mono text-zinc-500 dark:text-zinc-400">{language || 'text'}</span>
         <button
           type="button"
           onClick={copy}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-zinc-400 opacity-0 transition group-hover:opacity-100 hover:bg-zinc-800 hover:text-zinc-100"
+          className={cn(
+            'flex items-center gap-1 rounded px-1.5 py-0.5 opacity-0 transition group-hover:opacity-100',
+            'text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900',
+            'dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100',
+          )}
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
           {copied ? '已复制' : '复制'}

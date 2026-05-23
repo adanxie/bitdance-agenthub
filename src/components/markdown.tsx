@@ -52,7 +52,10 @@ export function Markdown({ children, className }: MarkdownProps) {
             const isBlock = codeClass?.startsWith('language-')
             if (isBlock) {
               return (
-                <code className={cn(codeClass, 'font-mono text-xs')} {...rest}>
+                <code
+                  className={cn(codeClass, 'font-mono text-xs text-zinc-900 dark:text-zinc-100')}
+                  {...rest}
+                >
                   {children}
                 </code>
               )
@@ -67,7 +70,14 @@ export function Markdown({ children, className }: MarkdownProps) {
             )
           },
           pre: ({ children }) => (
-            <pre className="my-2 overflow-x-auto rounded-md border bg-zinc-950 px-3 py-2 text-xs leading-relaxed text-zinc-100">
+            <pre
+              className={cn(
+                'my-2 overflow-x-auto rounded-md border px-3 py-2 text-xs leading-relaxed',
+                'border-zinc-200 bg-zinc-50 text-zinc-900',
+                'dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100',
+                '[&_code]:text-zinc-900 dark:[&_code]:text-zinc-100',
+              )}
+            >
               {children}
             </pre>
           ),
