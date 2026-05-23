@@ -48,6 +48,19 @@ export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {
   return agent
 }
 
+export type UpdateAgentBody = Partial<Omit<CreateAgentBody, 'avatar'>>
+
+export async function updateAgent(agentId: string, patch: UpdateAgentBody): Promise<AgentRow> {
+  const { agent } = await json<{ agent: AgentRow }>(
+    fetch(`/api/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  )
+  return agent
+}
+
 export async function deleteAgent(agentId: string): Promise<void> {
   await json<{ ok: true }>(fetch(`/api/agents/${agentId}`, { method: 'DELETE' }))
 }

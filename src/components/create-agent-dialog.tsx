@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -13,7 +13,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { createAgent, type CreateAgentBody } from '@/lib/api'
+import type { AgentRow } from '@/db/schema'
+import {
+  createAgent,
+  updateAgent,
+  type CreateAgentBody,
+  type UpdateAgentBody,
+} from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
@@ -27,14 +33,23 @@ const PROVIDER_DEFAULTS: Record<Provider, { label: string; defaultModel: string 
 
 const AVAILABLE_TOOLS = ['write_artifact', 'read_artifact'] as const
 
+/**
+ * 创建 / 编辑 Agent 的对话框。
+ *
+ * 传入 `agent` 进入编辑模式，未传则为创建模式。两种模式公用同一套字段、
+ * 同一套校验，只是 submit 路径与文案不同。
+ */
 export function CreateAgentDialog({
   open,
   onOpenChange,
+  agent,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  agent?: AgentRow
 }) {
   const upsertAgent = useAppStore((s) => s.upsertAgent)
+  const isEdit = !!agent
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -48,19 +63,33 @@ export function CreateAgentDialog({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const resetForm = () => {
-    setName('')
-    setDescription('')
-    setCapabilitiesText('')
-    setSystemPrompt('')
-    setProvider('deepseek')
-    setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
-    setToolNames(new Set(['write_artifact', 'read_artifact']))
+  // 每次打开 / 切换 agent 时，重置表单到该 agent 的当前值（或创建态的默认）。
+  useEffect(() => {
+    if (!open) return
+    if (agent) {
+      setName(agent.name)
+      setDescription(agent.description)
+      setCapabilitiesText(agent.capabilities.join(', '))
+      setSystemPrompt(agent.systemPrompt)
+      const p = (agent.modelProvider ?? 'deepseek') as Provider
+      setProvider(p)
+      setModelId(agent.modelId ?? PROVIDER_DEFAULTS[p].defaultModel)
+      setToolNames(new Set(agent.toolNames))
+    } else {
+      setName('')
+      setDescription('')
+      setCapabilitiesText('')
+      setSystemPrompt('')
+      setProvider('deepseek')
+      setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
+      setToolNames(new Set(['write_artifact', 'read_artifact']))
+    }
     setError(null)
-  }
+  }, [open, agent])
 
   const handleProviderChange = (p: Provider) => {
     setProvider(p)
+    // 切换 provider 时把 modelId 自动重置到该 provider 的默认（避免跨家串）
     setModelId(PROVIDER_DEFAULTS[p].defaultModel)
   }
 
@@ -82,25 +111,39 @@ export function CreateAgentDialog({
     if (!description.trim()) return setError('描述不能为空')
     if (!systemPrompt.trim()) return setError('System Prompt 不能为空')
 
-    const body: CreateAgentBody = {
-      name: trimmed,
-      avatar: '',
-      description: description.trim(),
-      capabilities: capabilitiesText
-        .split(/[,，\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-      systemPrompt: systemPrompt.trim(),
-      modelProvider: provider,
-      modelId: modelId.trim(),
-      toolNames: Array.from(toolNames),
-    }
+    const capabilities = capabilitiesText
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
 
     setSubmitting(true)
     try {
-      const agent = await createAgent(body)
-      upsertAgent(agent)
-      resetForm()
+      if (isEdit && agent) {
+        const patch: UpdateAgentBody = {
+          name: trimmed,
+          description: description.trim(),
+          capabilities,
+          systemPrompt: systemPrompt.trim(),
+          modelProvider: provider,
+          modelId: modelId.trim(),
+          toolNames: Array.from(toolNames),
+        }
+        const updated = await updateAgent(agent.id, patch)
+        upsertAgent(updated)
+      } else {
+        const body: CreateAgentBody = {
+          name: trimmed,
+          avatar: '',
+          description: description.trim(),
+          capabilities,
+          systemPrompt: systemPrompt.trim(),
+          modelProvider: provider,
+          modelId: modelId.trim(),
+          toolNames: Array.from(toolNames),
+        }
+        const created = await createAgent(body)
+        upsertAgent(created)
+      }
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -113,9 +156,11 @@ export function CreateAgentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>创建 Agent</DialogTitle>
+          <DialogTitle>{isEdit ? '编辑 Agent' : '创建 Agent'}</DialogTitle>
           <DialogDescription>
-            为这个 Agent 设定身份与能力。它会出现在新建对话的选择列表里。
+            {isEdit
+              ? '修改这个 Agent 的配置。保存后立即生效，已存在的会话也会用新配置回复。'
+              : '为这个 Agent 设定身份与能力。它会出现在新建对话的选择列表里。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -218,7 +263,7 @@ export function CreateAgentDialog({
             取消
           </Button>
           <Button onClick={() => void submit()} disabled={submitting}>
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? (isEdit ? '保存中...' : '创建中...') : isEdit ? '保存' : '创建'}
           </Button>
         </DialogFooter>
       </DialogContent>

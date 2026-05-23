@@ -1,9 +1,39 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 
-import { deleteCustomAgent } from '@/server/agent-service'
+import { deleteCustomAgent, updateCustomAgent } from '@/server/agent-service'
 
 interface RouteContext {
   params: Promise<{ id: string }>
+}
+
+const PatchBody = z
+  .object({
+    name: z.string().min(1).max(64).optional(),
+    description: z.string().min(1).max(280).optional(),
+    capabilities: z.array(z.string()).optional(),
+    systemPrompt: z.string().min(1).optional(),
+    modelProvider: z.enum(['anthropic', 'openai', 'deepseek']).optional(),
+    modelId: z.string().min(1).optional(),
+    toolNames: z.array(z.string()).optional(),
+  })
+  .strict()
+
+export async function PATCH(req: NextRequest, ctx: RouteContext) {
+  const { id } = await ctx.params
+  const raw = await req.json().catch(() => null)
+  const parsed = PatchBody.safeParse(raw)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid body', issues: parsed.error.issues }, { status: 400 })
+  }
+
+  try {
+    const agent = await updateCustomAgent(id, parsed.data)
+    return NextResponse.json({ agent })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
 }
 
 export async function DELETE(_req: Request, ctx: RouteContext) {

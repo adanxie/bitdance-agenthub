@@ -1,6 +1,6 @@
 'use client'
 
-import { Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
@@ -15,23 +15,38 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import type { AgentRow } from '@/db/schema'
 import { deleteAgent as deleteAgentAPI } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAgentList, useAppStore } from '@/stores/app-store'
 
 /**
  * AgentLibrary — 「Agents」tab 的内容。列出内置 + 自建 Agent，
- * 顶部入口创建新的，自建项 hover 显示删除。
+ * 顶部入口创建新的，自建项 hover 显示编辑 / 删除。
  */
 export function AgentLibrary() {
   const agents = useAgentList()
   const removeAgent = useAppStore((s) => s.removeAgent)
 
-  const [createOpen, setCreateOpen] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   const deleteTarget = deleteTargetId ? agents.find((a) => a.id === deleteTargetId) : null
+
+  const openCreate = () => {
+    setEditingAgent(null)
+    setFormOpen(true)
+  }
+  const openEdit = (agent: AgentRow) => {
+    setEditingAgent(agent)
+    setFormOpen(true)
+  }
+  const handleFormOpenChange = (open: boolean) => {
+    setFormOpen(open)
+    if (!open) setEditingAgent(null)
+  }
 
   const confirmDelete = async () => {
     if (!deleteTargetId) return
@@ -53,7 +68,7 @@ export function AgentLibrary() {
         <Button
           className="w-full justify-start gap-2"
           variant="outline"
-          onClick={() => setCreateOpen(true)}
+          onClick={openCreate}
         >
           <Plus className="size-4" />
           创建 Agent
@@ -96,19 +111,32 @@ export function AgentLibrary() {
                   </div>
                 </div>
                 {!a.isBuiltin && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDeleteTargetId(a.id)
-                    }}
-                    title="删除 Agent"
-                    className={cn(
-                      'shrink-0 self-center opacity-0 transition group-hover:opacity-100 hover:text-red-600',
-                    )}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  <div className="flex shrink-0 self-center gap-1 opacity-0 transition group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openEdit(a)
+                      }}
+                      title="编辑 Agent"
+                      className="text-muted-foreground transition hover:text-foreground"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeleteTargetId(a.id)
+                      }}
+                      title="删除 Agent"
+                      className={cn(
+                        'text-muted-foreground transition hover:text-red-600',
+                      )}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
             ))
@@ -116,7 +144,11 @@ export function AgentLibrary() {
         </div>
       </ScrollArea>
 
-      <CreateAgentDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <CreateAgentDialog
+        open={formOpen}
+        onOpenChange={handleFormOpenChange}
+        agent={editingAgent ?? undefined}
+      />
 
       <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
         <DialogContent>
