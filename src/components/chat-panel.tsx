@@ -1,6 +1,6 @@
 'use client'
 
-import { UserPlus } from 'lucide-react'
+import { MessagesSquare, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
@@ -20,9 +20,16 @@ export function ChatPanel() {
   if (!conv) {
     return (
       <main className="flex min-w-0 flex-1 items-center justify-center bg-background">
-        <div className="space-y-3 text-center text-muted-foreground">
-          <div className="text-5xl">💬</div>
-          <div className="text-sm">选择左侧会话开始聊天，或新建一个</div>
+        <div className="flex max-w-sm flex-col items-center gap-4 px-6 text-center">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-muted">
+            <MessagesSquare className="size-7 text-muted-foreground" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-semibold">开始你的多 Agent 协作</h2>
+            <p className="text-sm leading-6 text-muted-foreground">
+              从左侧选择一个会话继续聊天，或点击「+ 新建对话」选择一个或多个 Agent 开始
+            </p>
+          </div>
         </div>
       </main>
     )
