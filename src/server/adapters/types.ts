@@ -33,6 +33,11 @@ export interface AdapterInput {
   /** 该 agent 单独配置的 API base URL（如 anyrouter）。null 表示走 SDK 默认 endpoint。 */
   apiBaseUrl: string | null
 
+  /** 该 agent 选择的模型 id。所有 adapter 共用：
+   *  - CustomAgentAdapter: 必填（OpenAI 兼容协议的 model 字段）
+   *  - ClaudeCodeAdapter: 可选，null 时 adapter 走 SDK 默认（如 'claude-opus-4-7'） */
+  modelId: string | null
+
   /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。
    *  Claude Code adapter 会忽略此字段（用 SDK preset 工具集）。 */
   toolNames: string[]
@@ -43,7 +48,6 @@ export interface AdapterInput {
   /** 仅 CustomAgentAdapter 使用（OpenAI 兼容协议特有的模型选择） */
   customConfig?: {
     modelProvider: ModelProvider
-    modelId: string
     /** 该 agent 的 model 是否支持视觉（来自 agent.supportsVision） */
     supportsVision?: boolean
   }

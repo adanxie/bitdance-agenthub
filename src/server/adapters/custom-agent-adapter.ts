@@ -40,7 +40,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     if (!input.customConfig) {
       throw new Error('CustomAgentAdapter requires customConfig')
     }
-    const { modelProvider, modelId, supportsVision } = input.customConfig
+    if (!input.modelId) {
+      throw new Error('CustomAgentAdapter requires modelId')
+    }
+    const { modelProvider, supportsVision } = input.customConfig
+    const modelId = input.modelId
     const systemPrompt = input.systemPrompt
     const apiKey = input.apiKey
 

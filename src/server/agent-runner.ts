@@ -673,13 +673,13 @@ function buildAdapterInput(
     systemPrompt: systemPromptWithWorkspace,
     apiKey: agent.apiKey,
     apiBaseUrl: agent.apiBaseUrl,
+    modelId: agent.modelId,
     toolNames,
     attachments: attachments.length > 0 ? attachments : undefined,
     customConfig:
       agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
         ? {
             modelProvider: agent.modelProvider,
-            modelId: agent.modelId,
             supportsVision: agent.supportsVision,
           }
         : undefined,

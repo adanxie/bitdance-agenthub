@@ -78,7 +78,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     const options: Options = {
       cwd: getEffectiveCwd(workspace),
       abortController: controller,
-      model: input.customConfig?.modelId ?? DEFAULT_MODEL,
+      model: input.modelId ?? DEFAULT_MODEL,
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
