@@ -241,6 +241,14 @@ async function bridgePermission(
   toolInput: Record<string, unknown>,
   ctx: PermissionCtx,
 ): Promise<PermissionResult> {
+  // SDK 的运行时 Zod schema 要求 allow 必带 updatedInput（TypeScript type 标 optional 但运行时必填）；
+  // 无修改场景下回填原 input 即可。deny 必带 message。
+  const allow = (updated: Record<string, unknown> = toolInput): PermissionResult => ({
+    behavior: 'allow',
+    updatedInput: updated,
+  })
+  const deny = (message: string): PermissionResult => ({ behavior: 'deny', message })
+
   // 1. 路径沙箱检查（Read/Write/Edit/NotebookEdit）
   if (PATH_TOOLS.has(toolName)) {
     const target =
@@ -249,10 +257,7 @@ async function bridgePermission(
       try {
         assertPathWithinWorkspace(ctx.workspace, target)
       } catch (e) {
-        return {
-          behavior: 'deny',
-          message: e instanceof Error ? e.message : `Path is outside workspace: ${target}`,
-        }
+        return deny(e instanceof Error ? e.message : `Path is outside workspace: ${target}`)
       }
     }
   }
@@ -262,34 +267,28 @@ async function bridgePermission(
     const cmd = (toolInput.command as string | undefined) ?? ''
     const banned = findBannedPattern(cmd)
     if (banned) {
-      return {
-        behavior: 'deny',
-        message: `Command blocked by safety policy (matches ${banned}): ${cmd.slice(0, 100)}`,
-      }
+      return deny(`Command blocked by safety policy (matches ${banned}): ${cmd.slice(0, 100)}`)
     }
-    return { behavior: 'allow' }
+    return allow()
   }
 
   // 3. fs_write 审批 (Write / Edit)
   if (FS_WRITE_TOOLS.has(toolName)) {
-    if (ctx.approvalMode === 'auto') return { behavior: 'allow' }
+    if (ctx.approvalMode === 'auto') return allow()
     const target = (toolInput.file_path as string) ?? (toolInput.path as string)
-    if (!target) return { behavior: 'deny', message: 'Missing file_path/path' }
+    if (!target) return deny('Missing file_path/path')
 
     const oldContent = readIfExists(ctx.workspace, target)
     const newContent = computeNewContent(toolName, toolInput, oldContent)
     if (newContent instanceof Error) {
-      return { behavior: 'deny', message: newContent.message }
+      return deny(newContent.message)
     }
 
     let absPath: string
     try {
       absPath = assertPathWithinWorkspace(ctx.workspace, target)
     } catch (e) {
-      return {
-        behavior: 'deny',
-        message: e instanceof Error ? e.message : 'Path outside workspace',
-      }
+      return deny(e instanceof Error ? e.message : 'Path outside workspace')
     }
 
     const pending = pendingWrites.register({
@@ -308,22 +307,19 @@ async function bridgePermission(
       pendingWrites.attachResolver(pending.id, resolve)
     })
     if (!decision.applied) {
-      return { behavior: 'deny', message: 'User rejected the file change' }
+      return deny('User rejected the file change')
     }
-    return { behavior: 'allow' }
+    return allow()
   }
 
   // 4. NotebookEdit：MVP 不支持审批 diff，直接 deny 让用户切 Auto
   if (toolName === 'NotebookEdit') {
-    if (ctx.approvalMode === 'auto') return { behavior: 'allow' }
-    return {
-      behavior: 'deny',
-      message: 'NotebookEdit approval not yet supported in Review mode; switch to Auto mode.',
-    }
+    if (ctx.approvalMode === 'auto') return allow()
+    return deny('NotebookEdit approval not yet supported in Review mode; switch to Auto mode.')
   }
 
   // 5. 默认放行（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）
-  return { behavior: 'allow' }
+  return allow()
 }
 
 /** 把 Write/Edit 的输入转成「应用后的完整文件内容」用于 diff viewer。 */
