@@ -245,6 +245,41 @@ export async function setConversationApprovalMode(
   return withWorkspaceMeta({ ...conv, fsWriteApprovalMode: mode, updatedAt: now })
 }
 
+// ─── 收藏 / 取消收藏消息 ────────────────────────────────
+/**
+ * Toggle 一条消息在 conversation.pinnedMessageIds 中的存在。
+ * pinnedMessageIds 同时被 agent-runner 注入到 LLM 长期上下文（spec 01）—— 用户标星 = 提醒 LLM。
+ */
+export async function togglePinnedMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<{ pinnedMessageIds: string[]; pinned: boolean }> {
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, conversationId),
+  })
+  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+  // 校验 message 属于该会话
+  const msg = await db.query.messages.findFirst({
+    where: and(
+      eq(schema.messages.id, messageId),
+      eq(schema.messages.conversationId, conversationId),
+    ),
+  })
+  if (!msg) throw new Error(`Message not found in conversation: ${messageId}`)
+
+  const current = conv.pinnedMessageIds ?? []
+  const isPinned = current.includes(messageId)
+  const next = isPinned ? current.filter((id) => id !== messageId) : [...current, messageId]
+
+  await db
+    .update(schema.conversations)
+    .set({ pinnedMessageIds: next, updatedAt: Date.now() })
+    .where(eq(schema.conversations.id, conversationId))
+
+  return { pinnedMessageIds: next, pinned: !isPinned }
+}
+
 // ─── 添加 Agent 到现有会话 ──────────────────────────────
 export interface AddAgentsArgs {
   conversationId: string

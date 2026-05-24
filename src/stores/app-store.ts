@@ -86,6 +86,8 @@ interface AppState {
 
   setReplyTarget(conversationId: string, messageId: string | null): void
 
+  setPinnedMessageIds(conversationId: string, ids: string[]): void
+
   /** 批量删除消息（撤回 / 编辑场景）。同时清理 messageIdsByConv 对应桶 + replyTarget。 */
   removeMessages(conversationId: string, messageIds: string[]): void
 
@@ -280,6 +282,12 @@ export const useAppStore = create<AppState>()(
         else delete s.replyTargetByConv[conversationId]
       }),
 
+    setPinnedMessageIds: (conversationId, ids) =>
+      set((s) => {
+        const conv = s.conversations[conversationId]
+        if (conv) conv.pinnedMessageIds = ids
+      }),
+
     addPendingAttachment: (conversationId, attachment) =>
       set((s) => {
         const list = s.pendingAttachmentsByConv[conversationId] ?? []
@@ -319,7 +327,7 @@ export const useAppStore = create<AppState>()(
             s.highlightedMessageId = null
           })
         }
-      }, 1500)
+      }, 2000)
     },
 
     addLocalUserMessage: ({ tempId, conversationId, content, mentionedAgentIds, parentMessageId, attachments }) =>

@@ -1,6 +1,6 @@
 'use client'
 
-import { AtSign, CornerUpLeft, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { AtSign, CornerUpLeft, Loader2, Pencil, Star, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
@@ -35,6 +35,9 @@ export function MessageItem({ message }: { message: MessageRow }) {
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
   const highlightMessage = useAppStore((s) => s.highlightMessage)
   const isHighlighted = useAppStore((s) => s.highlightedMessageId === message.id)
+  const isPinned = useAppStore((s) =>
+    s.conversations[message.conversationId]?.pinnedMessageIds?.includes(message.id) ?? false,
+  )
   const parentMessage = useAppStore((s) =>
     message.parentMessageId ? s.messages[message.parentMessageId] : null,
   )
@@ -144,6 +147,14 @@ export function MessageItem({ message }: { message: MessageRow }) {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-medium">{name}</span>
           <span>{formatTime(message.createdAt)}</span>
+          {isPinned && (
+            <span
+              className="text-amber-500"
+              title="已收藏 · 作为长期上下文注入 LLM"
+            >
+              <Star className="size-3 fill-amber-400" />
+            </span>
+          )}
           {message.status === 'streaming' && (
             <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
           )}

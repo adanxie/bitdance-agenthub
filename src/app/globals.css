@@ -147,11 +147,14 @@
   0% {
     box-shadow: 0 16px 36px -8px rgba(51, 112, 255, 0);
   }
-  15% {
-    box-shadow: 0 26px 56px -4px rgba(51, 112, 255, 0.6);
+  20% {
+    box-shadow: 0 26px 56px -4px rgba(51, 112, 255, 0.55);
   }
-  60% {
-    box-shadow: 0 20px 44px -6px rgba(51, 112, 255, 0.35);
+  50% {
+    box-shadow: 0 24px 52px -6px rgba(51, 112, 255, 0.45);
+  }
+  80% {
+    box-shadow: 0 20px 44px -8px rgba(51, 112, 255, 0.2);
   }
   100% {
     box-shadow: 0 16px 36px -8px rgba(51, 112, 255, 0);
@@ -159,5 +162,5 @@
 }
 
 .message-glow {
-  animation: message-glow-pulse 1.5s ease-out;
+  animation: message-glow-pulse 2s cubic-bezier(0.22, 1, 0.36, 1);
 }
