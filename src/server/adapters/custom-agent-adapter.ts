@@ -77,6 +77,14 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
     const MAX_TURNS = 8
     let turn = 0
+    // 跨 turn 累加 token 用量；run 结束前 yield run.usage 给 AgentRunner 落库
+    const runUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      lastInputTokens: 0,
+    }
 
     while (turn < MAX_TURNS) {
       if (signal.aborted) return
@@ -105,6 +113,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
             messages,
             tools: apiTools.length > 0 ? apiTools : undefined,
             stream: true,
+            stream_options: { include_usage: true },
           },
           { signal },
         )
@@ -117,6 +126,16 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
         if (signal.aborted) return
+        // Final usage chunk (stream_options.include_usage)：choices 通常空，只携 usage。
+        // DeepSeek 还附带 prompt_cache_hit_tokens / prompt_cache_miss_tokens。
+        const usage = (chunk as { usage?: Record<string, number> | null }).usage
+        if (usage) {
+          const inp = usage.prompt_tokens ?? 0
+          runUsage.inputTokens += inp
+          runUsage.outputTokens += usage.completion_tokens ?? 0
+          runUsage.cacheReadTokens += usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
+          runUsage.lastInputTokens = inp
+        }
         const choice = chunk.choices[0]
         if (!choice) continue
         // DeepSeek V4/R1 等 thinking-mode 模型在 delta 上加了 reasoning_content
@@ -211,6 +230,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       if (toolCalls.length === 0 || finishReason === 'stop') {
         yield baseEvent(input, { type: 'message.end', messageId })
+        yield baseEvent(input, {
+          type: 'run.usage',
+          runId: input.runId,
+          usage: { ...runUsage, model: modelId },
+        })
         return
       }
 
@@ -285,6 +309,12 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       yield baseEvent(input, { type: 'message.end', messageId })
       // 继续下一轮
     }
+    // 到达 MAX_TURNS 兜底：把累计 usage emit 一下（正常路径在 line 232 已 emit 过 + return）
+    yield baseEvent(input, {
+      type: 'run.usage',
+      runId: input.runId,
+      usage: { ...runUsage, model: modelId },
+    })
   }
 }
 

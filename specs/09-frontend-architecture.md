@@ -81,8 +81,9 @@ interface AppState {
 | Event | State 变更 |
 |---|---|
 | `heartbeat` | 无变更（仅作连接保活信号，由 SSE 端定期发） |
-| `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running' }` |
+| `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running', usage: null }` |
 | `run.end` | 更新 run 的 `status` / `finishedAt` / `error` |
+| `run.usage` | 更新 run 的 `usage` 字段（input/output/cache tokens）；派生 hook `useConversationUsageTotal` 据此聚合 |
 | `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
 | `message.end` | `messages[messageId].status = 'complete'` |
 | `part.start` | `messages[messageId].parts[partIndex] = event.part`（按 index 插入，不 push） |
@@ -192,7 +193,7 @@ app/page.tsx
     │   │   └── <CreateAgentDialog />    ── 顶部 radio 选 adapterName（'custom' / 'claude-code'）；Claude Code 模式下隐藏 provider/工具集，apiKey 文案改为 "Anthropic key（留空走 ~/.claude OAuth）"
     │   └── <RenameInput />       ── 内联重命名
     ├── <ChatPanel />             ── 当前会话主区
-    │   ├── header: 头像堆 + AgentInfoPopover + 文件树/产物预览 toggle + FileLibraryDialog + AddAgentDialog
+    │   ├── header: 头像堆 + AgentInfoPopover + 文件树/产物预览 toggle + FileLibraryDialog + AddAgentDialog + UsageBadge（点开 popover 看 token 拆分）
     │   ├── tab bar（openFiles 非空时显示）: 「对话」+ 每个打开的文件 / diff tab
     │   ├── 主体（按 activeTab 切换）:
     │   │   ├── activeTab === 'chat': <MessageList> + <PendingWritesPanel> + <MessageInput>

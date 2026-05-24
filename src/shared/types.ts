@@ -117,6 +117,7 @@ export type StreamEvent = BaseEvent &
   (
     | { type: 'run.start'; runId: string; agentId: string; triggerMessageId: string; parentRunId?: string }
     | { type: 'run.end'; runId: string; status: 'complete' | 'failed' | 'aborted'; error?: string }
+    | { type: 'run.usage'; runId: string; usage: RunUsageEvent }
     | { type: 'message.start'; messageId: string; agentId: string; runId: string }
     | { type: 'message.end'; messageId: string }
     | { type: 'part.start'; messageId: string; partIndex: number; part: MessagePart }
@@ -133,6 +134,16 @@ export type StreamEvent = BaseEvent &
     | { type: 'fs_write.resolved'; pendingId: string; applied: boolean }
     | { type: 'heartbeat' }
   )
+
+/** RunUsage 事件 payload。与 db/schema.ts 的 RunUsage 同形，重复定义避开 client/server 边界 import。 */
+export interface RunUsageEvent {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  lastInputTokens?: number
+  model?: string
+}
 
 // 简化版 Artifact，用于事件 payload（与 DB 行结构一致）
 export interface ArtifactRecord {

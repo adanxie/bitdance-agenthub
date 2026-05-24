@@ -390,6 +390,7 @@ export const useAppStore = create<AppState>()(
               status: 'running',
               error: null,
               parentRunId: event.parentRunId ?? null,
+              usage: null,
               startedAt: event.timestamp,
               finishedAt: null,
             }
@@ -403,6 +404,12 @@ export const useAppStore = create<AppState>()(
               run.finishedAt = event.timestamp
               run.error = event.error ?? null
             }
+            return
+          }
+
+          case 'run.usage': {
+            const run = s.runsByConv[event.conversationId]?.[event.runId]
+            if (run) run.usage = event.usage
             return
           }
 
@@ -630,3 +637,61 @@ export const useActiveTab = (conversationId: string): string =>
 /** 该会话当前所有待审批的 fs_write（review 模式下 agent 想改文件，等用户决定）。 */
 export const usePendingWrites = (conversationId: string | null): PendingWrite[] =>
   useAppStore(useShallow((s) => (conversationId ? s.pendingWritesByConv[conversationId] ?? [] : [])))
+
+/** 累计该会话所有 run 的 token 用量 + 上次 run 的 input prompt 长度（用于 ctx 仪表）+ per-agent 拆分。 */
+export interface ConversationUsageTotal {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+  /** 最近一次有 usage 的 run 的 input prompt token 数（context window 仪表用） */
+  lastInputTokens: number
+  /** key = agentId，value = 该 agent 的累计 input+output tokens */
+  byAgent: Record<string, number>
+  /** key = modelId，value = 累计 input+output tokens */
+  byModel: Record<string, number>
+  /** 累计了多少个有 usage 的 run（用于显示 "N 次响应"） */
+  runCount: number
+}
+
+export const useConversationUsageTotal = (conversationId: string | null): ConversationUsageTotal =>
+  useAppStore(
+    useShallow((s) => {
+      const empty: ConversationUsageTotal = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        totalTokens: 0,
+        lastInputTokens: 0,
+        byAgent: {},
+        byModel: {},
+        runCount: 0,
+      }
+      if (!conversationId) return empty
+      const runs = s.runsByConv[conversationId]
+      if (!runs) return empty
+      let latestRunWithUsage = -1
+      let latestInput = 0
+      for (const run of Object.values(runs)) {
+        const u = run.usage
+        if (!u) continue
+        empty.inputTokens += u.inputTokens
+        empty.outputTokens += u.outputTokens
+        empty.cacheCreationTokens += u.cacheCreationTokens
+        empty.cacheReadTokens += u.cacheReadTokens
+        empty.runCount++
+        const sub = u.inputTokens + u.outputTokens
+        empty.byAgent[run.agentId] = (empty.byAgent[run.agentId] ?? 0) + sub
+        if (u.model) empty.byModel[u.model] = (empty.byModel[u.model] ?? 0) + sub
+        if (run.startedAt > latestRunWithUsage) {
+          latestRunWithUsage = run.startedAt
+          latestInput = u.lastInputTokens ?? u.inputTokens
+        }
+      }
+      empty.totalTokens = empty.inputTokens + empty.outputTokens
+      empty.lastInputTokens = latestInput
+      return empty
+    }),
+  )

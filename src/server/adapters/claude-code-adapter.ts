@@ -185,7 +185,35 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         }
 
         if (m.type === 'result') {
-          // 终止信号
+          // 终止信号 —— 顺便采集 usage（success / error subtypes 都带 usage 字段）
+          const resultMsg = m as unknown as {
+            usage?: {
+              input_tokens?: number
+              output_tokens?: number
+              cache_creation_input_tokens?: number
+              cache_read_input_tokens?: number
+            }
+            modelUsage?: Record<string, unknown>
+          }
+          if (resultMsg.usage) {
+            const u = resultMsg.usage
+            const model =
+              resultMsg.modelUsage && Object.keys(resultMsg.modelUsage).length > 0
+                ? Object.keys(resultMsg.modelUsage)[0]
+                : (input.modelId ?? DEFAULT_MODEL)
+            yield baseEvent({
+              type: 'run.usage' as const,
+              runId: input.runId,
+              usage: {
+                inputTokens: u.input_tokens ?? 0,
+                outputTokens: u.output_tokens ?? 0,
+                cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+                cacheReadTokens: u.cache_read_input_tokens ?? 0,
+                lastInputTokens: u.input_tokens ?? 0,
+                model,
+              },
+            }) as StreamEvent
+          }
           break
         }
         // 其他系统消息（init / status / hook 事件 / task notification 等）暂时忽略

@@ -204,6 +204,35 @@ const result = await toolRegistry.execute(name, args, ctx)
 | **A. Adapter 自调 toolRegistry**（现状） | 模块顶部 import，loop 中直接 execute | 代码简单；Adapter 多一个依赖 |
 | **B. Adapter 只 yield 事件，Runner 执行后注入** | Adapter 必须支持「暂停-等待 result-继续」 | 干净；async iterator 双向通信复杂 |
 
+---
+
+## Token usage 采集
+
+所有 adapter 在 run 结束前 yield 一次 `run.usage` 事件（见 Spec 02），AgentRunner 收到后写入 `agent_runs.usage` JSON 列（见 Spec 08）。
+
+| Adapter | usage 来源 |
+|---|---|
+| `ClaudeCodeAdapter` | `SDKResultMessage.usage`（success / error 都有）+ `modelUsage` 拿实际模型 id |
+| `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；跨 turn 累加（一个 run 内可能 ≤ MAX_TURNS=8 次 chat.completions.create） |
+| `MockAdapter` | 不上报 usage（agent_runs.usage = null） |
+
+**字段映射**（OpenAI 协议 → 我们的 `RunUsage`）：
+- `prompt_tokens` → `inputTokens`
+- `completion_tokens` → `outputTokens`
+- `prompt_cache_hit_tokens` (DeepSeek) / `cached_tokens` (OpenAI) → `cacheReadTokens`
+- DeepSeek 不报 cache_creation；保持 0
+
+**字段映射**（Anthropic SDK → 我们的 `RunUsage`）：
+- `input_tokens` → `inputTokens`
+- `output_tokens` → `outputTokens`
+- `cache_creation_input_tokens` → `cacheCreationTokens`
+- `cache_read_input_tokens` → `cacheReadTokens`
+
+`lastInputTokens` 取本次 run 的 input prompt 长度，UI 用作「当前 context 大小」仪表。`model` 字段记录实际使用模型，按模型聚合用。
+
+仅记 token 数量，**不算成本**（不同 provider / 第三方网关价格差异大，价格表难维护准确）。Cache hit 数量本身就足够看出节约程度。
+
+
 方案 A 已落地。本 spec 承认放宽 —— Adapter **可以**调用 `toolRegistry`，但仍不**直接写 DB / 发 SSE**。Runner 仍是唯一的「event → 持久化 + 广播」入口。
 
 如果未来要重新隔离（比如要给 Adapter 跑在 worker thread / 子进程），再切方案 B。

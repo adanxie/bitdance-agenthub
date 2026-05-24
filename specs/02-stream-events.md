@@ -53,9 +53,21 @@ type StreamEvent = BaseEvent & (
   | { type: 'fs_write.pending',  pendingWrite: PendingWrite }       // agent 调 fs_write，等用户审批
   | { type: 'fs_write.resolved', pendingId: string, applied: boolean } // approve / reject / run abort
 
+  // —— Token usage 计量（adapter 在 run 结束前 emit）——
+  | { type: 'run.usage', runId: string, usage: RunUsageEvent }
+
   // —— 心跳 ——
   | { type: 'heartbeat' }
 )
+
+interface RunUsageEvent {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number    // Anthropic prompt cache 写入
+  cacheReadTokens: number        // Anthropic prompt cache 命中；DeepSeek prompt_cache_hit_tokens 也映射到这
+  lastInputTokens?: number       // 最近一次 input prompt 长度，UI 用作 ctx 仪表
+  model?: string                 // 实际使用的模型 id
+}
 
 interface PendingWrite {
   id: string                    // pwr_<nanoid>
@@ -182,6 +194,7 @@ run.end           (r1, 'complete')
 | `dispatch.*` | ❌ 透传（信息来自 plan_tasks 工具调用 + agent_runs 表） | |
 | `fs_write.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-writes.ts`）；dev server 重启丢失，前端 mount 时拉一次兜底 |
 | `fs_write.resolved` | ❌ 透传 | applied=true/false 由前端 store 用来移除对应 pending |
+| `run.usage` | ✅ 落到 `agent_runs.usage` JSON 列 | adapter 在 run 结束前 emit；前端 store 同步更新该 run 行 |
 | `heartbeat` | ❌ 透传 | |
 
 **写入策略**：流式 `part.delta` 高频，使用「内存缓冲 + 定时 flush」避免每个 delta 都打 DB：

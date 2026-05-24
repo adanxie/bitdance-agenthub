@@ -181,11 +181,28 @@ export const agentRuns = sqliteTable(
 
     parentRunId: text('parent_run_id'),
 
+    /** Token 使用量。run 完成时由 adapter 报告并由 AgentRunner 落库。null = 该 run 未上报（如 mock / 失败）。 */
+    usage: text('usage', { mode: 'json' }).$type<RunUsage>(),
+
     startedAt: integer('started_at').notNull(),
     finishedAt: integer('finished_at'),
   },
   (t) => [index('idx_runs_parent').on(t.parentRunId)],
 )
+
+/** RunUsage —— 一次 run 累计的 token 用量。所有字段 0+ 整数；不返回的字段 0 不是 null（聚合好处理）。 */
+export interface RunUsage {
+  inputTokens: number
+  outputTokens: number
+  /** Anthropic prompt caching: 写入缓存的 tokens（贵） */
+  cacheCreationTokens: number
+  /** Anthropic prompt caching: 命中缓存的 tokens（便宜）；DeepSeek 的 prompt_cache_hit_tokens 也映射到这里 */
+  cacheReadTokens: number
+  /** 用于上下文窗口仪表的最近一次「input prompt 长度」（不是累计），方便 UI 显示 ctx X/200k */
+  lastInputTokens?: number
+  /** 实际使用的模型 id；不同 run 可能不同（agent 配置改过 / 第三方网关动态路由），用来归类 */
+  model?: string
+}
 
 // ─── 类型导出（推断行类型）─────────────────────────────────
 export type AgentRow = typeof agents.$inferSelect

@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MessageInput } from '@/components/message-input'
 import { MessageList } from '@/components/message-list'
+import { UsageBadge } from '@/components/usage-badge'
 import { cn } from '@/lib/utils'
 import {
   useActiveConversation,
@@ -146,6 +147,7 @@ export function ChatPanel() {
           >
             <UserPlus className="size-4" />
           </Button>
+          <UsageBadge conversationId={conv.id} />
           <Badge variant={streamConnected ? 'default' : 'outline'} className="gap-1.5">
             <span
               className={`size-1.5 rounded-full ${streamConnected ? 'bg-green-500' : 'bg-zinc-400'}`}

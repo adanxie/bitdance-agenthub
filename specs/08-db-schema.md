@@ -183,6 +183,7 @@ agent_runs {
   status              text NOT NULL     // 'queued'|'running'|'complete'|'failed'|'aborted'
   error               text              // failed 时存错误概要
   parent_run_id       text              // Orchestrator 派出的子 run 指向父 run
+  usage               text JSON         // RunUsage：{ inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, lastInputTokens?, model? }；null = 该 run 未上报（mock / 中途失败）
   started_at          int  NOT NULL
   finished_at         int               // null = 仍在 running
 }

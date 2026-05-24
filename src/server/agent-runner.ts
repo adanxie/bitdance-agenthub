@@ -426,6 +426,15 @@ async function persistEvent(
   artifactIds: string[],
 ): Promise<void> {
   switch (event.type) {
+    case 'run.usage': {
+      // adapter 报告本次 run 的 token 用量；落到 agent_runs.usage（同 runId）。
+      // 多次 emit 时取最新（adapter 应该只 emit 一次，但 race 保护）。
+      await db
+        .update(schema.agentRuns)
+        .set({ usage: event.usage })
+        .where(eq(schema.agentRuns.id, event.runId))
+      return
+    }
     case 'message.start': {
       partsBuffer.set(event.messageId, [])
       outputMessageIds.push(event.messageId)
