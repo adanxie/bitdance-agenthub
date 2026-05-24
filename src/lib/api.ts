@@ -40,11 +40,17 @@ export interface CreateAgentBody {
   description: string
   capabilities: string[]
   systemPrompt: string
-  modelProvider: 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark'
-  modelId: string
+  /** 默认 'custom'。'claude-code' 走 Anthropic Claude Agent SDK，SDK 内置工具集 */
+  adapterName?: 'custom' | 'claude-code'
+  /** custom: required；claude-code: 忽略 */
+  modelProvider?: 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark'
+  /** custom: required；claude-code: 可选，默认 SDK 默认模型 */
+  modelId?: string
   toolNames: string[]
   supportsVision?: boolean
   apiKey?: string
+  /** 自定义 API base URL（第三方 endpoint，如 anyrouter）。空走默认 */
+  apiBaseUrl?: string
 }
 
 export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {
@@ -58,9 +64,11 @@ export async function createAgent(body: CreateAgentBody): Promise<AgentRow> {
   return agent
 }
 
-export type UpdateAgentBody = Partial<Omit<CreateAgentBody, 'avatar' | 'apiKey'>> & {
+export type UpdateAgentBody = Partial<Omit<CreateAgentBody, 'avatar' | 'apiKey' | 'apiBaseUrl'>> & {
   // 显式 null 表示清除自定义 key；undefined 表示不改
   apiKey?: string | null
+  // 同上
+  apiBaseUrl?: string | null
 }
 
 export async function updateAgent(agentId: string, patch: UpdateAgentBody): Promise<AgentRow> {

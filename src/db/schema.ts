@@ -27,6 +27,13 @@ export const agents = sqliteTable('agents', {
    */
   apiKey: text('api_key'),
 
+  /**
+   * 该 agent 单独的 API base URL（第三方 endpoint，如 anyrouter）。
+   * NULL 表示走 SDK 默认 endpoint（Claude Code → api.anthropic.com）。
+   * 配合 apiKey 一起用：base URL 非空时，apiKey 作为 AUTH_TOKEN 传给 SDK。
+   */
+  apiBaseUrl: text('api_base_url'),
+
   toolNames: text('tool_names', { mode: 'json' }).$type<string[]>().notNull(),
 
   isBuiltin: integer('is_builtin', { mode: 'boolean' }).notNull().default(false),

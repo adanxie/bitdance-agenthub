@@ -31,6 +31,7 @@ agents {
   model_provider  text              // 仅 adapter_name='custom' 时填
   model_id        text              // 同上
   api_key         text              // 该 agent 单独的 key；NULL 走 env
+  api_base_url    text              // 该 agent 单独的 endpoint（如第三方网关）；NULL 走 SDK 默认
   tool_names      text JSON         // string[]，引用 Spec 07
   is_builtin      int  bool default 0
   is_orchestrator int  bool default 0
@@ -43,6 +44,7 @@ agents {
 - `adapter_name='custom'` 时 `model_provider` + `model_id` 必填
 - `is_builtin=1` 的 agent 可修改、不可删除（service 层 enforce）
 - `api_key` 优先级高于 env var；按 provider 路由：`deepseek→DEEPSEEK_API_KEY` / `openai→OPENAI_API_KEY` / `volcano-ark→ARK_API_KEY` / `anthropic→ANTHROPIC_API_KEY`
+- `api_base_url` 非空时（Claude Code adapter），`api_key` 作为 `ANTHROPIC_AUTH_TOKEN` 传 SDK；`ANTHROPIC_BASE_URL` 设为 `api_base_url`；同时清空 `ANTHROPIC_API_KEY` 防覆盖（详见 Spec 05 ClaudeCodeAdapter）
 
 **索引**：无（agent 数量小，全表扫描可接受）
 

@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
 type Provider = 'deepseek' | 'anthropic' | 'openai' | 'volcano-ark'
+type AdapterKind = 'custom' | 'claude-code'
 
 const PROVIDER_DEFAULTS: Record<Provider, { label: string; defaultModel: string }> = {
   deepseek: { label: 'DeepSeek', defaultModel: 'deepseek-v4-flash' },
@@ -31,6 +32,8 @@ const PROVIDER_DEFAULTS: Record<Provider, { label: string; defaultModel: string 
   openai: { label: 'OpenAI', defaultModel: 'gpt-4o' },
   'volcano-ark': { label: '火山方舟 (豆包)', defaultModel: 'doubao-seed-2-0-lite-260428' },
 }
+
+const CLAUDE_CODE_DEFAULT_MODEL = 'claude-opus-4-7'
 
 const AVAILABLE_TOOLS = ['write_artifact', 'read_artifact', 'read_attachment', 'fs_read', 'fs_write', 'bash'] as const
 
@@ -56,6 +59,7 @@ export function CreateAgentDialog({
   const [description, setDescription] = useState('')
   const [capabilitiesText, setCapabilitiesText] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [adapterKind, setAdapterKind] = useState<AdapterKind>('custom')
   const [provider, setProvider] = useState<Provider>('deepseek')
   const [modelId, setModelId] = useState(PROVIDER_DEFAULTS.deepseek.defaultModel)
   const [toolNames, setToolNames] = useState<Set<string>>(
@@ -63,6 +67,7 @@ export function CreateAgentDialog({
   )
   const [supportsVision, setSupportsVision] = useState(true)
   const [apiKey, setApiKey] = useState('')
+  const [apiBaseUrl, setApiBaseUrl] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -71,17 +76,24 @@ export function CreateAgentDialog({
   useEffect(() => {
     if (!open) return
     if (agent) {
+      const kind: AdapterKind = agent.adapterName === 'claude-code' ? 'claude-code' : 'custom'
+      setAdapterKind(kind)
       setName(agent.name)
       setDescription(agent.description)
       setCapabilitiesText(agent.capabilities.join(', '))
       setSystemPrompt(agent.systemPrompt)
       const p = (agent.modelProvider ?? 'deepseek') as Provider
       setProvider(p)
-      setModelId(agent.modelId ?? PROVIDER_DEFAULTS[p].defaultModel)
+      setModelId(
+        agent.modelId ??
+          (kind === 'claude-code' ? CLAUDE_CODE_DEFAULT_MODEL : PROVIDER_DEFAULTS[p].defaultModel),
+      )
       setToolNames(new Set(agent.toolNames))
       setSupportsVision(agent.supportsVision)
       setApiKey(agent.apiKey ?? '')
+      setApiBaseUrl(agent.apiBaseUrl ?? '')
     } else {
+      setAdapterKind('custom')
       setName('')
       setDescription('')
       setCapabilitiesText('')
@@ -91,10 +103,20 @@ export function CreateAgentDialog({
       setToolNames(new Set(['write_artifact', 'read_artifact', 'read_attachment']))
       setSupportsVision(true)
       setApiKey('')
+      setApiBaseUrl('')
     }
     setShowApiKey(false)
     setError(null)
   }, [open, agent])
+
+  const handleAdapterKindChange = (kind: AdapterKind) => {
+    setAdapterKind(kind)
+    if (kind === 'claude-code') {
+      setModelId(CLAUDE_CODE_DEFAULT_MODEL)
+    } else {
+      setModelId(PROVIDER_DEFAULTS[provider].defaultModel)
+    }
+  }
 
   const handleProviderChange = (p: Provider) => {
     setProvider(p)
@@ -127,17 +149,19 @@ export function CreateAgentDialog({
 
     setSubmitting(true)
     try {
+      const isClaudeCode = adapterKind === 'claude-code'
       if (isEdit && agent) {
         const patch: UpdateAgentBody = {
           name: trimmed,
           description: description.trim(),
           capabilities,
           systemPrompt: systemPrompt.trim(),
-          modelProvider: provider,
+          modelProvider: isClaudeCode ? undefined : provider,
           modelId: modelId.trim(),
-          toolNames: Array.from(toolNames),
+          toolNames: isClaudeCode ? [] : Array.from(toolNames),
           supportsVision,
           apiKey: apiKey.trim() || null,
+          apiBaseUrl: apiBaseUrl.trim() || null,
         }
         const updated = await updateAgent(agent.id, patch)
         upsertAgent(updated)
@@ -148,11 +172,13 @@ export function CreateAgentDialog({
           description: description.trim(),
           capabilities,
           systemPrompt: systemPrompt.trim(),
-          modelProvider: provider,
-          modelId: modelId.trim(),
-          toolNames: Array.from(toolNames),
+          adapterName: adapterKind,
+          modelProvider: isClaudeCode ? undefined : provider,
+          modelId: modelId.trim() || undefined,
+          toolNames: isClaudeCode ? [] : Array.from(toolNames),
           supportsVision,
           apiKey: apiKey.trim() || undefined,
+          apiBaseUrl: apiBaseUrl.trim() || undefined,
         }
         const created = await createAgent(body)
         upsertAgent(created)
@@ -219,60 +245,155 @@ export function CreateAgentDialog({
           </div>
 
           <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-            <Label>底层模型</Label>
-            <div className="flex gap-2">
-              <select
-                value={provider}
-                onChange={(e) => handleProviderChange(e.target.value as Provider)}
-                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+            <Label>适配器</Label>
+            <div className="flex flex-col gap-1.5">
+              <label
+                className={cn(
+                  'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                  adapterKind === 'custom' && 'border-primary bg-primary/5',
+                )}
               >
-                {(Object.keys(PROVIDER_DEFAULTS) as Provider[]).map((p) => (
-                  <option key={p} value={p}>
-                    {PROVIDER_DEFAULTS[p].label}
-                  </option>
-                ))}
-              </select>
-              <Input
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                placeholder="model id"
-                className="flex-1 font-mono text-xs"
-              />
+                <input
+                  type="radio"
+                  name="adapterKind"
+                  checked={adapterKind === 'custom'}
+                  onChange={() => handleAdapterKindChange('custom')}
+                  className="mt-0.5 accent-primary"
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-medium">Custom（OpenAI 兼容协议）</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    用 DeepSeek / OpenAI / 火山方舟 等 OpenAI 兼容 API。可自定义工具集和模型。
+                  </div>
+                </div>
+              </label>
+              <label
+                className={cn(
+                  'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+                  adapterKind === 'claude-code' && 'border-primary bg-primary/5',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="adapterKind"
+                  checked={adapterKind === 'claude-code'}
+                  onChange={() => handleAdapterKindChange('claude-code')}
+                  className="mt-0.5 accent-primary"
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-medium">Claude Code SDK（推荐 Anthropic 用户）</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    用 @anthropic-ai/claude-agent-sdk，自带 Bash / Read / Write / Edit / Grep / Glob / WebFetch / Task 子 agent 等一整套工具。
+                  </div>
+                </div>
+              </label>
             </div>
           </div>
 
-          <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-            <Label>工具集</Label>
-            <div className="space-y-1">
-              {AVAILABLE_TOOLS.map((t) => (
-                <label
-                  key={t}
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm transition hover:border-foreground/30',
-                    toolNames.has(t) && 'border-primary bg-primary/5',
-                  )}
+          {adapterKind === 'custom' ? (
+            <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+              <Label>底层模型</Label>
+              <div className="flex gap-2">
+                <select
+                  value={provider}
+                  onChange={(e) => handleProviderChange(e.target.value as Provider)}
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm"
                 >
-                  <input
-                    type="checkbox"
-                    checked={toolNames.has(t)}
-                    onChange={() => toggleTool(t)}
-                    className="accent-primary"
-                  />
-                  <code className="font-mono text-xs">{t}</code>
-                </label>
-              ))}
+                  {(Object.keys(PROVIDER_DEFAULTS) as Provider[]).map((p) => (
+                    <option key={p} value={p}>
+                      {PROVIDER_DEFAULTS[p].label}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={modelId}
+                  onChange={(e) => setModelId(e.target.value)}
+                  placeholder="model id"
+                  className="flex-1 font-mono text-xs"
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+              <Label>Model ID</Label>
+              <div>
+                <Input
+                  value={modelId}
+                  onChange={(e) => setModelId(e.target.value)}
+                  placeholder={CLAUDE_CODE_DEFAULT_MODEL}
+                  className="font-mono text-xs"
+                />
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  Claude 模型 id，例 <code className="font-mono">claude-opus-4-7</code> /{' '}
+                  <code className="font-mono">claude-sonnet-4-6</code>。留空走 SDK 默认。
+                </div>
+              </div>
+            </div>
+          )}
+
+          {adapterKind === 'custom' ? (
+            <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+              <Label>工具集</Label>
+              <div className="space-y-1">
+                {AVAILABLE_TOOLS.map((t) => (
+                  <label
+                    key={t}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm transition hover:border-foreground/30',
+                      toolNames.has(t) && 'border-primary bg-primary/5',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={toolNames.has(t)}
+                      onChange={() => toggleTool(t)}
+                      className="accent-primary"
+                    />
+                    <code className="font-mono text-xs">{t}</code>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+              <Label>工具集</Label>
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                Claude Code agent 使用 SDK 内置工具集：Bash / Read / Write / Edit / Grep / Glob /
+                WebFetch / WebSearch / Task / TodoWrite 等。审批 / 沙箱 / 黑名单仍由 AgentHub 接管。
+              </div>
+            </div>
+          )}
+
+          {adapterKind === 'claude-code' && (
+            <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+              <Label>Base URL</Label>
+              <div>
+                <Input
+                  value={apiBaseUrl}
+                  onChange={(e) => setApiBaseUrl(e.target.value)}
+                  placeholder="https://api.anthropic.com（默认）"
+                  className="font-mono text-xs"
+                />
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  指向第三方 Claude API 兼容网关（如 <code className="font-mono">https://anyrouter.top</code>）；留空走 Anthropic 官方 endpoint。配此项时下方 API Key 自动作为 <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code> 传给 SDK。
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-[80px_1fr] items-start gap-3">
-            <Label>API Key</Label>
+            <Label>{adapterKind === 'claude-code' && apiBaseUrl.trim() ? 'Auth Token' : 'API Key'}</Label>
             <div>
               <div className="flex gap-2">
                 <Input
                   type={showApiKey ? 'text' : 'password'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="留空则使用环境变量"
+                  placeholder={
+                    adapterKind === 'claude-code' && apiBaseUrl.trim()
+                      ? '第三方网关的 token'
+                      : '留空则使用环境变量'
+                  }
                   className="flex-1 font-mono text-xs"
                   autoComplete="off"
                 />
@@ -286,17 +407,25 @@ export function CreateAgentDialog({
                 </Button>
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground">
-                填写后该 agent 优先用此 key；留空则 fallback 到{' '}
-                <code className="font-mono">
-                  {provider === 'deepseek'
-                    ? 'DEEPSEEK_API_KEY'
-                    : provider === 'volcano-ark'
-                      ? 'ARK_API_KEY'
-                      : provider === 'openai'
-                        ? 'OPENAI_API_KEY'
-                        : 'ANTHROPIC_API_KEY'}
-                </code>{' '}
-                环境变量
+                {adapterKind === 'claude-code' && apiBaseUrl.trim() ? (
+                  <>填写后作为 <code className="font-mono">ANTHROPIC_AUTH_TOKEN</code> 传给 SDK，路由到自定义 Base URL；留空则透传空 token（第三方网关可能拒绝）</>
+                ) : (
+                  <>
+                    填写后该 agent 优先用此 key；留空则 fallback 到{' '}
+                    <code className="font-mono">
+                      {adapterKind === 'claude-code'
+                        ? 'ANTHROPIC_API_KEY 环境变量 / 本机 ~/.claude OAuth 登录态'
+                        : provider === 'deepseek'
+                          ? 'DEEPSEEK_API_KEY'
+                          : provider === 'volcano-ark'
+                            ? 'ARK_API_KEY'
+                            : provider === 'openai'
+                              ? 'OPENAI_API_KEY'
+                              : 'ANTHROPIC_API_KEY'}
+                    </code>
+                    {adapterKind === 'claude-code' ? '' : ' 环境变量'}
+                  </>
+                )}
               </div>
             </div>
           </div>

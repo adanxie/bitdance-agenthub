@@ -8,18 +8,25 @@ export async function GET() {
   return NextResponse.json({ agents })
 }
 
-const CreateBody = z.object({
-  name: z.string().min(1).max(64),
-  avatar: z.string().max(8).optional(),
-  description: z.string().min(1).max(280),
-  capabilities: z.array(z.string()).default([]),
-  systemPrompt: z.string().min(1),
-  modelProvider: z.enum(['anthropic', 'openai', 'deepseek', 'volcano-ark']),
-  modelId: z.string().min(1),
-  toolNames: z.array(z.string()).default([]),
-  supportsVision: z.boolean().optional(),
-  apiKey: z.string().optional(),
-})
+const CreateBody = z
+  .object({
+    name: z.string().min(1).max(64),
+    avatar: z.string().max(8).optional(),
+    description: z.string().min(1).max(280),
+    capabilities: z.array(z.string()).default([]),
+    systemPrompt: z.string().min(1),
+    adapterName: z.enum(['custom', 'claude-code']).default('custom'),
+    modelProvider: z.enum(['anthropic', 'openai', 'deepseek', 'volcano-ark']).optional(),
+    modelId: z.string().min(1).optional(),
+    toolNames: z.array(z.string()).default([]),
+    supportsVision: z.boolean().optional(),
+    apiKey: z.string().optional(),
+    apiBaseUrl: z.string().optional(),
+  })
+  .refine(
+    (d) => d.adapterName !== 'custom' || (d.modelProvider && d.modelId),
+    { message: 'Custom adapter requires modelProvider and modelId' },
+  )
 
 export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => null)

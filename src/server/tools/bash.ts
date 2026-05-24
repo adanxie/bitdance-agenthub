@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
+import { BANNED_PATTERNS } from '@/server/security'
 import { getEffectiveCwd } from '@/server/workspace-utils'
 
 import type { ToolDef } from './types'
@@ -15,18 +16,6 @@ const ArgsSchema = z.object({
 
 const TIMEOUT_MS = 30_000
 const MAX_OUTPUT_CHARS = 10_000
-
-// CLAUDE.md §5.2 黑名单。新增模式请同步该文档。
-const BANNED_PATTERNS: RegExp[] = [
-  /\brm\s+-rf\s+\//,
-  /\bsudo\b/,
-  /\bchmod\s+\d{3,4}\s+\//,
-  /:\(\)\{\s*:\|:&\s*\}/, // fork bomb
-  /curl\s+[^|]*\|\s*(bash|sh)/,
-  /wget\s+[^|]*\|\s*(bash|sh)/,
-  /\beval\b/,
-  /\bexec\b\s+/,
-]
 
 /**
  * 跨平台 shell 选择。本轮只在 macOS / Linux 验证，

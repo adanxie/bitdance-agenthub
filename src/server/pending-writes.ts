@@ -18,6 +18,8 @@ interface PendingEntry {
   write: PendingWrite
   workspace: WorkspaceRow
   resolver: ((decision: { applied: boolean }) => void) | null
+  /** true = approve 时不调 writeFileInWorkspace（写盘由调用方负责，如 Claude Code SDK 内置 Edit/Write）。 */
+  skipWrite: boolean
 }
 
 class PendingWritesStore {
@@ -32,6 +34,9 @@ class PendingWritesStore {
     oldContent: string | null
     newContent: string
     workspace: WorkspaceRow
+    /** 默认 false：approve 时调 writeFileInWorkspace 自己写盘（适用 AgentHub 自带 fs_write 工具）。
+     *  true：approve 后不写盘，仅 resolver 通知调用方放行（适用 ClaudeCodeAdapter，SDK 自己写）。 */
+    skipWrite?: boolean
   }): PendingWrite {
     const id = newPendingWriteId()
     const write: PendingWrite = {
@@ -45,7 +50,12 @@ class PendingWritesStore {
       newContent: args.newContent,
       createdAt: Date.now(),
     }
-    this.map.set(id, { write, workspace: args.workspace, resolver: null })
+    this.map.set(id, {
+      write,
+      workspace: args.workspace,
+      resolver: null,
+      skipWrite: args.skipWrite ?? false,
+    })
 
     // 推 SSE 让前端弹审批 dialog
     eventBus.publish({
@@ -77,13 +87,15 @@ class PendingWritesStore {
   approve(id: string): boolean {
     const entry = this.map.get(id)
     if (!entry) return false
-    try {
-      writeFileInWorkspace(entry.workspace, entry.write.path, entry.write.newContent)
-    } catch (err) {
-      // 写入失败仍视作「未应用」让 LLM 看到错误，但 dialog 也要关
-      console.error('[pendingWrites] approve write failed', err)
-      this.finalize(id, false)
-      return false
+    if (!entry.skipWrite) {
+      try {
+        writeFileInWorkspace(entry.workspace, entry.write.path, entry.write.newContent)
+      } catch (err) {
+        // 写入失败仍视作「未应用」让 LLM 看到错误，但 dialog 也要关
+        console.error('[pendingWrites] approve write failed', err)
+        this.finalize(id, false)
+        return false
+      }
     }
     this.finalize(id, true)
     return true

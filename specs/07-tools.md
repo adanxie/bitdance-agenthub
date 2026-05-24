@@ -292,6 +292,8 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 - **bash 命令前匹配 CLAUDE.md §5.2 黑名单**（rm -rf /、sudo、fork bomb、curl pipe shell 等）
 - **不引入新依赖而不在 PR 中说明**（CLAUDE.md §4.3）
 
+**`BANNED_PATTERNS` 跨 adapter / 工具共享**：定义在 `src/server/security.ts`，由 `findBannedPattern(command)` 暴露。`bash` 工具和 `ClaudeCodeAdapter`（用 SDK Bash 工具时）都走同一份名单，新增模式同步 CLAUDE.md §5.2 并只改 `security.ts` 这一处。
+
 **TODO 工具（CLAUDE.md 提到但仍未实装）**：
 
 - `web_fetch` —— 抓取 URL 内容（SSRF 防护：禁止 localhost / 内网 IP / file://）
@@ -302,8 +304,24 @@ LLM 决定调用 →  Adapter emit  tool.call (StreamEvent)
 
 ---
 
+## Claude Code agent 的工具集（不走 AgentHub 工具表）
+
+`adapterName === 'claude-code'` 的 agent 不消费上面的「内置工具清单」。它通过 Claude Agent SDK 直接使用 SDK preset 工具集：`Bash` / `Read` / `Write` / `Edit` / `Grep` / `Glob` / `WebFetch` / `WebSearch` / `Task` / `TodoWrite` / `NotebookEdit` / `Mcp` 等（命名为 PascalCase，与 AgentHub 的 snake_case 区分）。
+
+**审批 / 沙箱 / 黑名单仍由 AgentHub 接管**，但接缝在 adapter 的 `canUseTool` 钩子（详见 Spec 05 「ClaudeCodeAdapter / canUseTool 桥」一节）：
+
+- 路径检查走 `assertPathWithinWorkspace`（共享）
+- Bash 黑名单走 `findBannedPattern`（共享）
+- `fs_write` 审批走同一个 `pendingWrites` store —— 但 `register` 传 `skipWrite: true`，approve 后由 SDK 自己写盘（不调 `writeFileInWorkspace`）。前端 UI（`PendingWritesPanel` / `PendingWriteDiffTab`）对这两条路径完全无感
+
+**副作用**：sandbox 模式 quota（`SANDBOX_TOTAL_BYTES` / `SANDBOX_TOTAL_FILES`）对 Claude Code agent 失效（SDK 自己写盘绕过 quota 检查）。Claude Code agent 实际场景都是 `workspace.mode === 'local'`（绑真实项目），quota 不适用，可接受。
+
+**新增 Claude Code 路径的工具**（例如未来想给 Claude Code agent 接 `write_artifact`）：通过 SDK 的 MCP server 注册自定义工具，或在 `canUseTool` 里转发到 AgentHub 自己工具的 handler 然后用 `behavior: 'allow' + updatedInput` 把结果回填给 SDK。MVP 不做。
+
+---
+
 ## 与 Spec 01 / 05 / 06 的关系
 
-- Spec 01：定义了 `Agent.toolNames`（引用本 spec 的工具名）
-- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Adapter 如何调用 ToolExecutor
+- Spec 01：定义了 `Agent.toolNames`（引用本 spec 的工具名；Claude Code agent 强制 `[]`）
+- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Custom / Claude Code 两条 adapter 路径如何分别使用工具
 - Spec 06：`plan_tasks` 工具是 Orchestrator 三阶段工作流的核心

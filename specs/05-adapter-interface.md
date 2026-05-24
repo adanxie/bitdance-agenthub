@@ -12,10 +12,8 @@
 |---|---|
 | `MockAdapter` | ✅ 已实现，用于开发期不烧 token |
 | `CustomAgentAdapter` | ✅ 已实现，覆盖 DeepSeek / OpenAI / 火山方舟（OpenAI 兼容协议）；**Anthropic 路径在 buildClient 里直接 throw，待实装** |
-| `ClaudeCodeAdapter` | ❌ **未实现**（registry 注释里标 TODO）。CLAUDE.md §2 的 `@anthropic-ai/claude-agent-sdk` 依赖目前未被任何 adapter 使用 |
-| `CodexAdapter` | ❌ **未实现**（同上） |
-
-如果新人按本 spec「ClaudeCodeAdapter」一节去找代码，会找不到 —— 那是设计预案。当前所有 LLM 接入走 `CustomAgentAdapter`。
+| `ClaudeCodeAdapter` | ✅ 已实现，基于 `@anthropic-ai/claude-agent-sdk` `query()` + `canUseTool` 审批桥 |
+| `CodexAdapter` | ❌ **未实现**（registry 注释里标 TODO） |
 
 ---
 
@@ -29,7 +27,7 @@
 ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐
 │ ClaudeCode   │  │ Codex        │  │ CustomAgent      │  │ Mock         │
 │ Adapter      │  │ Adapter      │  │ Adapter          │  │ Adapter      │
-│ (TODO)       │  │ (TODO)       │  │ ✅ 已实现         │  │ ✅ 已实现     │
+│ ✅ 已实现     │  │ (TODO)       │  │ ✅ 已实现         │  │ ✅ 已实现     │
 └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  └──────┬───────┘
        │                 │                   │                    │
    @anthropic-ai/    codex SDK / CLI    OpenAI SDK            预设脚本
@@ -71,8 +69,14 @@ interface AdapterInput {
   prompt: string                // 已被外层拼好的完整 prompt（群聊场景含 XML 包装，详见 Spec 06）
   workspacePath: string         // 该会话的 workspace 绝对路径
 
-  // 当前 agent 可用的工具名。Adapter 自行 toolRegistry.resolve(toolNames) 拿 ToolDef。
-  // 这是与早期 spec 的偏离：曾经传整个 ToolDef[]，现在只传名字（避免在 input 里塞 handler 函数引用）
+  // 系统提示，AgentRunner 已注入 <workspace_info> 块。所有 adapter 共用
+  systemPrompt: string
+
+  // 该 agent 单独的 API key；null 时 adapter 走环境 / OAuth fallback
+  apiKey: string | null
+
+  // 当前 agent 可用的工具名。Custom adapter 用 toolRegistry.resolve(toolNames) 拿 ToolDef；
+  // Claude Code adapter 忽略此字段（用 SDK preset 内置工具集）
   toolNames: string[]
 
   // 附件（用户上传的文件/图片）— 用于 multimodal 投递
@@ -84,19 +88,12 @@ interface AdapterInput {
     absPath: string             // 服务端绝对路径，Adapter 自读
   }>
 
-  // 仅 CustomAgentAdapter 使用
+  // 仅 CustomAgentAdapter 使用（OpenAI 兼容协议特有的模型选择）
   customConfig?: {
-    systemPrompt: string
     modelProvider: 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark'
     modelId: string
-
-    apiKey?: string             // 该 agent 单独的 key；缺省走 env var（按 provider 路由）
     supportsVision: boolean     // 决定是否把图片附件以 image_url block 投递给 LLM
   }
-
-  // ID 生成器，确保整个系统 ID 一致
-  generateMessageId: () => string
-  generatePartId: () => string
 }
 ```
 
@@ -104,6 +101,7 @@ interface AdapterInput {
 - `tools: ToolDef[]` → `toolNames: string[]`：避免把 handler 函数引用塞进 input；Adapter 用 `toolRegistry.resolve` 自查
 - 新增 `attachments`：multimodal 路径
 - 新增 `customConfig.modelProvider: 'volcano-ark'`：OpenAI-compat 接入
+- `systemPrompt` / `apiKey` 提升到根字段（不再嵌 `customConfig`）：所有 adapter 都需要，ClaudeCodeAdapter 也读这两个
 - 新增 `customConfig.apiKey`：per-agent API key（优先级高于 env，见 Spec 08）
 - 新增 `customConfig.supportsVision`：决定是否把图片以 multimodal 投递
 - 新增 `parentRunId`：Orchestrator 子 run 的父引用
@@ -235,28 +233,112 @@ class MockAdapter implements AgentPlatformAdapter {
 
 ---
 
-## ClaudeCodeAdapter（TODO）
+## ClaudeCodeAdapter
 
-设计预案（不在当前代码中）。封装 `@anthropic-ai/claude-agent-sdk` 的 `query()` API。
+源文件：`src/server/adapters/claude-code-adapter.ts`
+
+封装 `@anthropic-ai/claude-agent-sdk` 的 `query()` API。SDK 自身就是 Claude Code CLI 的底层（同一 codebase 拆出的库），所以 ClaudeCodeAdapter 等价于把整个 Claude Code 接进来当一个 AgentHub agent。
 
 ```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { AbortError, query, type Options } from '@anthropic-ai/claude-agent-sdk'
+import { pendingWrites } from '@/server/pending-writes'
+import { findBannedPattern } from '@/server/security'
+import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 
 class ClaudeCodeAdapter implements AgentPlatformAdapter {
   readonly name = 'claude-code' as const
-
   async *stream(input, signal) {
-    // ... 见早期 spec 草稿
+    const controller = new AbortController()
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+
+    const options: Options = {
+      cwd: getEffectiveCwd(workspace),
+      abortController: controller,
+      model: input.customConfig?.modelId ?? 'claude-opus-4-7',
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: input.systemPrompt },
+      tools: { type: 'preset', preset: 'claude_code' },
+      includePartialMessages: true,
+      settingSources: [],           // 隔离 mode，不读用户 ~/.claude 设定
+      permissionMode: 'default',    // 自己 canUseTool 接管
+      env: input.apiKey ? { ...process.env, ANTHROPIC_API_KEY: input.apiKey } : process.env,
+      canUseTool: bridgePermission, // ↓ 见下方
+    }
+
+    const q = query({ prompt: input.prompt, options })
+    for await (const m of q) {
+      // 翻译 SDKMessage → StreamEvent
+    }
   }
 }
 ```
 
-**SDK 自带的能力**（不用我们写）：tool loop、文件读写工具、bash 工具、上下文压缩、错误重试。
-**我们要做**：事件翻译 + ID 注入 + 增量工具的 callback 注册。
+### 事件翻译
 
-**实施前需要决定**：
-- `AdapterInput.toolNames` 里的工具（write_artifact / read_artifact / read_attachment）如何透传给 Claude Agent SDK（自定义 MCP server 还是 callback）
-- Claude Agent SDK 的 bash / fs 工具与 CLAUDE.md §5.2/§5.3 黑名单的接缝
+| SDK 消息 | 对应 StreamEvent |
+|---|---|
+| `SDKSystemMessage subtype:'init'` | 忽略 |
+| `SDKPartialAssistantMessage` (开 `includePartialMessages: true`) `content_block_delta + text_delta` | 第一次开 text part：`part.start({type:'text',content:''})`；后续：`part.delta({type:'text.append',text})` |
+| `SDKAssistantMessage.message.content` 里的 `text` 块 | 兜底：若 partial 没投递过，整段开一个 text part |
+| `SDKAssistantMessage.message.content` 里的 `tool_use` 块 | `tool.call({callId,toolName,args})`；本地 `Map<sdk_id, ourCallId>` 记账 |
+| `SDKUserMessage.message.content` 里的 `tool_result` 块 | 用 `Map` 查回 `callId`，`tool.result({callId,result,isError})` |
+| `SDKResultMessage` (success / error variants) | 跳出 for-await，最后 emit `message.end` |
+| 其他（task progress / hook events / status / notification） | 忽略（MVP） |
+
+`message.start` / `message.end` 由 adapter 自己起止；`run.start` / `run.end` 仍由 AgentRunner 包外发。
+
+### canUseTool 桥（审批 / 沙箱 / 黑名单）
+
+SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子，每次工具调用前回调。AgentHub 在这里集中处理所有安全策略：
+
+1. **路径沙箱**（Read / Write / Edit / NotebookEdit）：`assertPathWithinWorkspace(workspace, toolInput.file_path)`，越界 `{ behavior: 'deny', message }`
+2. **Bash 黑名单**（Bash）：`findBannedPattern(toolInput.command)` 命中 deny；通过即 allow（cwd 已限定）
+3. **fs_write 审批**（Write / Edit；Auto 模式直接 allow）：
+   - `oldContent = readIfExists(workspace, path)`
+   - `newContent = computeNewContent(...)` —— Write 取 `content`；Edit 用 `oldContent.split(old_string).join(new_string)` 计算应用后文件（`replace_all=false` 时要求 1 次匹配，跟 SDK 行为对齐）
+   - `pendingWrites.register({ ..., skipWrite: true })` —— **关键**：传 `skipWrite: true`，approve 时 store 不调 `writeFileInWorkspace`，让 SDK 自己写
+   - `await new Promise(resolve => pendingWrites.attachResolver(pending.id, resolve))` 阻塞等用户决定
+   - applied → `{ behavior: 'allow' }`；rejected → `{ behavior: 'deny', message: 'User rejected the file change' }`
+4. **NotebookEdit**：MVP 不做 diff 审批，Review 模式直接 deny；Auto 模式 allow
+5. **其它工具**（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）：默认 allow
+
+### 工具集
+
+完全用 SDK preset `'claude_code'`（即 Claude Code CLI 自带的全套），不消费 `AdapterInput.toolNames`。AgentHub 自家工具（`write_artifact` / `fs_read` / `fs_write` / `bash` / ...）对 Claude Code agent 不暴露。`fs_write` 审批流通过 `pendingWrites` store 共享，UI 层（`PendingWritesPanel` / `PendingWriteDiffTab`）和 `bash.ts` / `claude-code-adapter.ts` 共享 `BANNED_PATTERNS`（`src/server/security.ts`）。
+
+### Subagent (Task)
+
+SDK Task 工具开子 agent 后，子 agent 的 `tool_use` / `tool_result` 块默认在同一个 `query()` 流上推回（`parent_tool_use_id` 非 null）。MVP 不把子 agent 抽成独立 `AgentRun`，UI 把这些 tool_use 直接作为父 message 里的 `ToolUsePart` 渲染就行。后续可通过 `Options.forwardSubagentText: true` + `SubagentStart`/`SubagentStop` hooks 升级成独立 child run。
+
+### API key fallback
+
+三层（SDK 内置后两层）：
+
+1. `agent.apiKey` (DB) → 通过 `options.env.ANTHROPIC_API_KEY` 传 SDK 子进程
+2. 进程 `process.env.ANTHROPIC_API_KEY`
+3. `~/.claude/.credentials.json`（Claude Code CLI OAuth 登录态）
+
+用户什么都不配，本机装过 Claude Code 并 login 过就能直接用。
+
+### Abort
+
+`Options.abortController` 接收 AbortSignal。AgentRunner 给每个 run 的 `signal` 透传到 SDK：
+
+```typescript
+const controller = new AbortController()
+signal.addEventListener('abort', () => controller.abort(), { once: true })
+```
+
+捕获 `AbortError` 区分主动中止和真错误（中止时静默 return，run.end 状态由 AgentRunner 决定为 `'aborted'`）。
+
+### 不做 / 推迟
+
+- Codex adapter（独立 P1）
+- Subagent 独立 child run（MVP 同流够用）
+- MCP server 配置 UI
+- Skills / Plugins / Worktree SDK 高级特性
+- `write_artifact` 给 Claude Code agent（绑本地项目时文件就是产物）
+- NotebookEdit 审批 diff
+- Thinking 块翻译（需要开 Anthropic betas）
 
 ---
 

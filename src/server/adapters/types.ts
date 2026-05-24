@@ -23,21 +23,29 @@ export interface AdapterInput {
   /** 工作目录绝对路径 */
   workspacePath: string
 
-  /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。 */
+  /** 系统提示，已注入 `<workspace_info>` 块。所有 adapter 共用。 */
+  systemPrompt: string
+
+  /** 该 agent 单独配置的 API key（来自 agent.apiKey）；为 null 时 adapter 走环境 / OAuth fallback。
+   *  当 apiBaseUrl 非空时，此值会被当作 AUTH_TOKEN 传给 SDK（兼容第三方网关）。 */
+  apiKey: string | null
+
+  /** 该 agent 单独配置的 API base URL（如 anyrouter）。null 表示走 SDK 默认 endpoint。 */
+  apiBaseUrl: string | null
+
+  /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。
+   *  Claude Code adapter 会忽略此字段（用 SDK preset 工具集）。 */
   toolNames: string[]
 
   /** 触发消息的附件（图片 / 文件），adapter 决定是否注入到 LLM content */
   attachments?: AdapterAttachment[]
 
-  /** 仅 CustomAgentAdapter 使用 */
+  /** 仅 CustomAgentAdapter 使用（OpenAI 兼容协议特有的模型选择） */
   customConfig?: {
-    systemPrompt: string
     modelProvider: ModelProvider
     modelId: string
     /** 该 agent 的 model 是否支持视觉（来自 agent.supportsVision） */
     supportsVision?: boolean
-    /** 该 agent 单独配置的 API key（来自 agent.apiKey）；空时 fallback env */
-    apiKey?: string | null
   }
 }
 

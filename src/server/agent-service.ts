@@ -17,16 +17,30 @@ export interface CreateAgentArgs {
   description: string
   capabilities: string[]
   systemPrompt: string
-  modelProvider: ModelProvider
-  modelId: string
+  /** 'custom' (默认) | 'claude-code'。Claude Code 用 SDK 内置工具集 + 仅需 modelId */
+  adapterName?: 'custom' | 'claude-code'
+  /** custom: required；claude-code: 忽略（可不传） */
+  modelProvider?: ModelProvider
+  /** custom: required；claude-code: 可选，默认 SDK 默认模型 */
+  modelId?: string
+  /** claude-code 忽略此字段（SDK 内置工具集，不走 toolRegistry）*/
   toolNames: string[]
   supportsVision?: boolean
   apiKey?: string | null
+  /** 自定义 API base URL（第三方 endpoint，如 anyrouter）。NULL 走默认 */
+  apiBaseUrl?: string | null
 }
 
 export async function createCustomAgent(args: CreateAgentArgs) {
   const id = newAgentId()
   const createdAt = Date.now()
+  const adapterName: AdapterName = args.adapterName ?? 'custom'
+
+  if (adapterName === 'custom') {
+    if (!args.modelProvider || !args.modelId) {
+      throw new Error('Custom adapter requires modelProvider and modelId')
+    }
+  }
 
   const row = {
     id,
@@ -35,11 +49,13 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     description: args.description.trim(),
     capabilities: args.capabilities,
     systemPrompt: args.systemPrompt,
-    adapterName: 'custom' as AdapterName,
-    modelProvider: args.modelProvider,
-    modelId: args.modelId,
+    adapterName,
+    modelProvider: adapterName === 'custom' ? (args.modelProvider ?? null) : null,
+    modelId: args.modelId ?? null,
     apiKey: args.apiKey?.trim() || null,
-    toolNames: args.toolNames,
+    apiBaseUrl: args.apiBaseUrl?.trim() || null,
+    // claude-code 走 SDK preset 工具集，不消费 toolNames；强制空数组避免 UI 残留
+    toolNames: adapterName === 'claude-code' ? [] : args.toolNames,
     isBuiltin: false,
     isOrchestrator: false,
     supportsVision: args.supportsVision ?? false,
@@ -79,6 +95,8 @@ export interface UpdateAgentPatch {
   supportsVision?: boolean
   /** 传 null 显式清除自定义 key（fallback 回 env）；undefined 表示不动 */
   apiKey?: string | null
+  /** 传 null 显式清除自定义 base URL；undefined 表示不动 */
+  apiBaseUrl?: string | null
 }
 
 export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch) {
@@ -98,6 +116,7 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   if (patch.toolNames !== undefined) updates.toolNames = patch.toolNames
   if (patch.supportsVision !== undefined) updates.supportsVision = patch.supportsVision
   if (patch.apiKey !== undefined) updates.apiKey = patch.apiKey?.trim() || null
+  if (patch.apiBaseUrl !== undefined) updates.apiBaseUrl = patch.apiBaseUrl?.trim() || null
 
   if (Object.keys(updates).length === 0) return agent
 

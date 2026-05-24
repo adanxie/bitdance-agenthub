@@ -23,6 +23,7 @@ interface Agent {
   modelProvider?: ModelProvider
   modelId?: string              // 厂商内部 model id
   apiKey?: string               // per-agent 自定义 key；NULL 走 env var（详见 Spec 10）
+  apiBaseUrl?: string           // per-agent 自定义 API endpoint（如 anyrouter）；NULL 走 SDK 默认
 
   toolNames: string[]           // 该 Agent 可调用的工具，引用 Spec 07
 
@@ -40,6 +41,8 @@ type ModelProvider = 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark'
 **约束**：
 - `isOrchestrator: true` 的 Agent 必须 `toolNames.includes('plan_tasks')`（早期 spec 用过 `dispatch_to_agent` 命名，已统一为 `plan_tasks`，详见 Spec 07）
 - `adapterName === 'custom'` 时 `modelProvider` 和 `modelId` 必填
+- `adapterName === 'claude-code'` 时 `modelProvider` 忽略；`modelId` 可选（默认走 SDK 默认模型 `claude-opus-4-7`）；`toolNames` 强制 `[]`（Claude Code 用 SDK 内置工具集，详见 Spec 07）
+- `apiKey` / `apiBaseUrl` 是 per-agent 凭据：`apiBaseUrl` 非空时（如第三方网关 anyrouter），`apiKey` 作为 AUTH_TOKEN 传给 SDK；否则作为 API_KEY
 - `isBuiltin: true` 的 Agent 不可删除但可修改配置（详见 Spec 10）
 - 删除 Agent 不级联删除使用它的 Conversation；前端应展示「已停用 Agent」灰态
 

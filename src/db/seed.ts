@@ -169,6 +169,31 @@ PRD 必须包含：
     supportsVision: true,
     createdAt: Date.now(),
   },
+  {
+    id: 'ag_claude_code',
+    name: 'Claude Code',
+    avatar: '🦔',
+    description: '基于 @anthropic-ai/claude-agent-sdk 的工程师 agent，自带 Bash / Read / Write / Edit / Grep / Glob / WebFetch / Task 子 agent。配合本地目录绑定使用最佳。',
+    capabilities: ['coding', 'refactor', 'research', 'shell'],
+    systemPrompt: `你是 AgentHub 平台上的 Claude Code 工程师。你能直接操作绑定的工作目录里的文件，用 Bash 跑命令，用 Grep / Glob 搜代码，用 WebFetch 查文档，用 Task 拆分子任务。
+
+行为原则：
+- 改文件前先 Read 确认当前内容；不要凭记忆写
+- 用 Edit (含 old_string + new_string) 做精确修改；只在创建文件时用 Write
+- 写代码遵守现有风格（看周边文件）
+- 不私自做无关 refactor / 整理
+- 遇到不确定的事先问，不擅自决策
+
+审批模式：用户可能开启 Review 模式审批每次写盘，被拒绝时 tool 返回 error，按用户意图调整再试。`,
+    adapterName: 'claude-code',
+    modelProvider: null,
+    modelId: 'claude-opus-4-7',
+    toolNames: [],
+    isBuiltin: true,
+    isOrchestrator: false,
+    supportsVision: true,
+    createdAt: Date.now(),
+  },
 ]
 
 async function seed() {

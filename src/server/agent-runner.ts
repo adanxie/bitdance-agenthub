@@ -670,16 +670,17 @@ function buildAdapterInput(
     runId,
     prompt,
     workspacePath: effectiveCwd,
+    systemPrompt: systemPromptWithWorkspace,
+    apiKey: agent.apiKey,
+    apiBaseUrl: agent.apiBaseUrl,
     toolNames,
     attachments: attachments.length > 0 ? attachments : undefined,
     customConfig:
       agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
         ? {
-            systemPrompt: systemPromptWithWorkspace,
             modelProvider: agent.modelProvider,
             modelId: agent.modelId,
             supportsVision: agent.supportsVision,
-            apiKey: agent.apiKey,
           }
         : undefined,
   }

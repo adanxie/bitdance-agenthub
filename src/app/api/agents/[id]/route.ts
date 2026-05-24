@@ -19,6 +19,7 @@ const PatchBody = z
     supportsVision: z.boolean().optional(),
     // null 表示清除，空字符串当 null 处理
     apiKey: z.union([z.string(), z.null()]).optional(),
+    apiBaseUrl: z.union([z.string(), z.null()]).optional(),
   })
   .strict()
 
