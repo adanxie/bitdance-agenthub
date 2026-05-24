@@ -49,6 +49,21 @@ export function UsageBadge({ conversationId }: { conversationId: string }) {
           <div className="my-1 border-t" />
           <Row label="合计" value={total.totalTokens} bold />
           <Row label="当前 ctx" value={total.lastInputTokens} dim hint="最近一次 prompt 大小" />
+          {/* Cache 命中率：cacheRead / (input + cacheRead)，只有有 cache 数据时显示 */}
+          {total.cacheReadTokens > 0 && (
+            <div className="flex items-baseline justify-between gap-3 text-emerald-600">
+              <span className="truncate">Cache 命中率</span>
+              <span className="shrink-0 font-mono">
+                {Math.round(
+                  (total.cacheReadTokens * 100) / (total.inputTokens + total.cacheReadTokens),
+                )}
+                %
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  (省 {formatTok(total.cacheReadTokens)} 输入)
+                </span>
+              </span>
+            </div>
+          )}
         </div>
 
         {Object.keys(total.byAgent).length > 1 && (

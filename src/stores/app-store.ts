@@ -355,6 +355,7 @@ export const useAppStore = create<AppState>()(
           parentMessageId: parentMessageId ?? null,
           mentionedAgentIds,
           runId: null,
+          usage: null,
           createdAt: Date.now(),
         }
         s.messageIdsByConv[conversationId] ??= []
@@ -413,6 +414,12 @@ export const useAppStore = create<AppState>()(
             return
           }
 
+          case 'message.usage': {
+            const msg = s.messages[event.messageId]
+            if (msg) msg.usage = event.usage
+            return
+          }
+
           case 'message.start': {
             // 新 agent 消息（DB 端也插入了同 id 的行，前端再次接到是 idempotent）
             s.messages[event.messageId] = {
@@ -425,6 +432,7 @@ export const useAppStore = create<AppState>()(
               parentMessageId: null,
               mentionedAgentIds: [],
               runId: event.runId,
+              usage: null,
               createdAt: event.timestamp,
             }
             s.messageIdsByConv[event.conversationId] ??= []

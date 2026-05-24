@@ -123,6 +123,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       }
 
       let finishReason: string | null = null
+      // 本 turn 单条 message 的 usage（per-message）；与 runUsage 同时维护
+      const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
 
       for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
         if (signal.aborted) return
@@ -131,9 +133,14 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         const usage = (chunk as { usage?: Record<string, number> | null }).usage
         if (usage) {
           const inp = usage.prompt_tokens ?? 0
+          const out = usage.completion_tokens ?? 0
+          const cached = usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
+          msgUsage.inputTokens += inp
+          msgUsage.outputTokens += out
+          msgUsage.cacheReadTokens += cached
           runUsage.inputTokens += inp
-          runUsage.outputTokens += usage.completion_tokens ?? 0
-          runUsage.cacheReadTokens += usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? 0
+          runUsage.outputTokens += out
+          runUsage.cacheReadTokens += cached
           runUsage.lastInputTokens = inp
         }
         const choice = chunk.choices[0]
@@ -229,6 +236,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       messages.push(assistantMsg as ChatMessage)
 
       if (toolCalls.length === 0 || finishReason === 'stop') {
+        if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
+          yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+        }
         yield baseEvent(input, { type: 'message.end', messageId })
         yield baseEvent(input, {
           type: 'run.usage',
@@ -306,6 +316,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
 
+      if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
+        yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+      }
       yield baseEvent(input, { type: 'message.end', messageId })
       // 继续下一轮
     }

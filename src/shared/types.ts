@@ -120,6 +120,7 @@ export type StreamEvent = BaseEvent &
     | { type: 'run.usage'; runId: string; usage: RunUsageEvent }
     | { type: 'message.start'; messageId: string; agentId: string; runId: string }
     | { type: 'message.end'; messageId: string }
+    | { type: 'message.usage'; messageId: string; usage: MessageUsageEvent }
     | { type: 'part.start'; messageId: string; partIndex: number; part: MessagePart }
     | { type: 'part.delta'; messageId: string; partIndex: number; delta: PartDelta }
     | { type: 'part.end'; messageId: string; partIndex: number }
@@ -143,6 +144,13 @@ export interface RunUsageEvent {
   cacheReadTokens: number
   lastInputTokens?: number
   model?: string
+}
+
+/** Per-message usage 事件 payload。与 db/schema.ts 的 MessageUsage 同形。 */
+export interface MessageUsageEvent {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
 }
 
 // 简化版 Artifact，用于事件 payload（与 DB 行结构一致）

@@ -435,6 +435,14 @@ async function persistEvent(
         .where(eq(schema.agentRuns.id, event.runId))
       return
     }
+    case 'message.usage': {
+      // 单条 message 的 usage —— 用于消息卡片上小角标 hover 显示
+      await db
+        .update(schema.messages)
+        .set({ usage: event.usage })
+        .where(eq(schema.messages.id, event.messageId))
+      return
+    }
     case 'message.start': {
       partsBuffer.set(event.messageId, [])
       outputMessageIds.push(event.messageId)

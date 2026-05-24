@@ -148,6 +148,15 @@ export function MessageItem({ message }: { message: MessageRow }) {
           {message.status === 'streaming' && (
             <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
           )}
+          {/* Agent 消息的 token 用量小标，hover 看拆分 */}
+          {!isUser && message.usage && (
+            <span
+              className="cursor-help font-mono text-[10px] text-muted-foreground/60"
+              title={`Input: ${message.usage.inputTokens.toLocaleString()}\nOutput: ${message.usage.outputTokens.toLocaleString()}${message.usage.cacheReadTokens > 0 ? `\nCache 命中: ${message.usage.cacheReadTokens.toLocaleString()}` : ''}`}
+            >
+              {formatTokenShort(message.usage.inputTokens + message.usage.outputTokens)} tok
+            </span>
+          )}
           {/* 引用按钮 — hover 时显示 */}
           {!editing && (
             <button
@@ -275,4 +284,10 @@ export function MessageItem({ message }: { message: MessageRow }) {
 function formatTime(ts: number): string {
   const d = new Date(ts)
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatTokenShort(n: number): string {
+  if (n < 1000) return `${n}`
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 1)}k`
+  return `${(n / 1_000_000).toFixed(2)}M`
 }

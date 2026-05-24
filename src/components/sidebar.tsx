@@ -1,6 +1,6 @@
 'use client'
 
-import { Bot, Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { BarChart3, Bot, Layers, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { AgentLibrary } from '@/components/agent-library'
@@ -8,6 +8,7 @@ import { AgentAvatar } from '@/components/agent-avatar'
 import { ArtifactLibrary } from '@/components/artifact-library'
 import { NewConversationDialog } from '@/components/new-conversation-dialog'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { UsageDashboard } from '@/components/usage-dashboard'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,7 +30,7 @@ import { cn } from '@/lib/utils'
 import type { AgentRow, ConversationRow } from '@/db/schema'
 import { useAppStore, useConversationList } from '@/stores/app-store'
 
-type Mode = 'conversations' | 'artifacts' | 'agents'
+type Mode = 'conversations' | 'artifacts' | 'agents' | 'analytics'
 
 export function Sidebar() {
   const conversations = useConversationList()
@@ -134,6 +135,14 @@ export function Sidebar() {
           icon={<Bot className="size-4" />}
           label="Agents"
         />
+        <TabButton
+          mode={mode}
+          self="analytics"
+          collapsed={collapsed}
+          onClick={() => setMode('analytics')}
+          icon={<BarChart3 className="size-4" />}
+          label="分析"
+        />
       </div>
 
       {/* 内容区按 mode 分发 */}
@@ -227,8 +236,10 @@ export function Sidebar() {
         </>
       ) : mode === 'artifacts' ? (
         !collapsed && <ArtifactLibrary />
-      ) : (
+      ) : mode === 'agents' ? (
         !collapsed && <AgentLibrary />
+      ) : (
+        !collapsed && <UsageDashboard />
       )}
 
       <NewConversationDialog open={dialogOpen} onOpenChange={setDialogOpen} />

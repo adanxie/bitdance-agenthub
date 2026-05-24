@@ -96,10 +96,20 @@ export const messages = sqliteTable(
 
     runId: text('run_id'),
 
+    /** 这条消息（单 LLM 响应）的 token 用量。null 表示 user 消息 / 不上报的 mock / 旧数据 */
+    usage: text('usage', { mode: 'json' }).$type<MessageUsage>(),
+
     createdAt: integer('created_at').notNull(),
   },
   (t) => [index('idx_messages_conv_created').on(t.conversationId, t.createdAt)],
 )
+
+/** Per-message token usage —— 比 RunUsage 略简，单条 LLM 响应级别。 */
+export interface MessageUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
 
 // ─── Artifacts ───────────────────────────────────────────────
 export const artifacts = sqliteTable(

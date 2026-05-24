@@ -201,15 +201,28 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               resultMsg.modelUsage && Object.keys(resultMsg.modelUsage).length > 0
                 ? Object.keys(resultMsg.modelUsage)[0]
                 : (input.modelId ?? DEFAULT_MODEL)
+            const input_tokens = u.input_tokens ?? 0
+            const output_tokens = u.output_tokens ?? 0
+            const cache_read = u.cache_read_input_tokens ?? 0
+            // ClaudeCode 一个 run 当作一条 message 渲染（同 messageId），所以 message.usage 等于 run usage
+            yield baseEvent({
+              type: 'message.usage' as const,
+              messageId,
+              usage: {
+                inputTokens: input_tokens,
+                outputTokens: output_tokens,
+                cacheReadTokens: cache_read,
+              },
+            }) as StreamEvent
             yield baseEvent({
               type: 'run.usage' as const,
               runId: input.runId,
               usage: {
-                inputTokens: u.input_tokens ?? 0,
-                outputTokens: u.output_tokens ?? 0,
+                inputTokens: input_tokens,
+                outputTokens: output_tokens,
                 cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
-                cacheReadTokens: u.cache_read_input_tokens ?? 0,
-                lastInputTokens: u.input_tokens ?? 0,
+                cacheReadTokens: cache_read,
+                lastInputTokens: input_tokens,
                 model,
               },
             }) as StreamEvent

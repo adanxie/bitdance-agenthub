@@ -389,3 +389,32 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
 export function attachmentDownloadUrl(attachmentId: string): string {
   return `/api/attachments/${attachmentId}`
 }
+
+// ─── Usage / Analytics ─────────────────────────────
+export interface UsageBucket {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  totalTokens: number
+  runs: number
+}
+
+export interface UsageSummary {
+  today: UsageBucket
+  week: UsageBucket
+  allTime: UsageBucket
+  topConversations: Array<{
+    id: string
+    title: string
+    totalTokens: number
+    runs: number
+    updatedAt: number
+  }>
+  byAgent: Array<{ agentId: string; name: string; totalTokens: number; runs: number }>
+  byModel: Array<{ model: string; totalTokens: number; runs: number }>
+}
+
+export async function fetchUsageSummary(): Promise<UsageSummary> {
+  return json<UsageSummary>(fetch('/api/usage/summary'))
+}
