@@ -10,7 +10,6 @@ import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
 import type { WorkspaceRow } from '@/db/schema'
-import { eventBus } from '@/server/event-bus'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
 import { pendingWrites } from '@/server/pending-writes'
@@ -35,6 +34,28 @@ import type { AdapterInput, AgentPlatformAdapter } from './types'
  *
  * 详见 specs/05-adapter-interface.md「ClaudeCodeAdapter」一节。
  */
+
+/**
+ * 每个 conversation 的 SDK session_id 缓存。SDK 默认每次 query() 是新 session，
+ * 不传 resume 时下一轮 agent 不会记得上一轮内容。我们把 init system message 里的
+ * session_id 缓存起来，下次同 conversation 再 query 时传 resume = sessionId。
+ *
+ * HMR-safe singleton。dev server 重启会丢失 —— 但 SDK 本身持久化到磁盘 (~/.claude
+ * sessions)，所以即使我们丢了 id，SDK 数据还在；只是接下来的会话变成新 session。
+ */
+const sessionsGlobal = globalThis as unknown as {
+  __agenthubClaudeSessions?: Map<string, string>
+}
+const claudeSessions: Map<string, string> =
+  sessionsGlobal.__agenthubClaudeSessions ?? new Map()
+if (!sessionsGlobal.__agenthubClaudeSessions) {
+  sessionsGlobal.__agenthubClaudeSessions = claudeSessions
+}
+
+/** 公开 API：清掉某个 conversation 的 session（删除 / 重新生成 / 撤回 / 编辑 时调用）。 */
+export function clearClaudeCodeSession(conversationId: string): void {
+  claudeSessions.delete(conversationId)
+}
 
 const DEFAULT_MODEL = 'claude-opus-4-7'
 /** SDK 内置工具中会改文件的，需要走审批 */
@@ -84,6 +105,8 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     let nextPartIndex = 0
     let activeTextPartIndex = -1 // -1 表示当前没有开放的 text part
     const toolCallIdByUseId = new Map<string, string>()
+    // 同步记录 tool name —— 让 tool_result 阶段能判断「这个结果是 write_artifact 来的，要 yield artifact.create」
+    const toolNameByUseId = new Map<string, string>()
 
     const toolCtx: ToolContext = {
       conversationId: input.conversationId,
@@ -113,32 +136,8 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
                 isError: true,
               }
             }
-            // 主动推 artifact.create 给前端 —— 否则 SDK 工具结果只是 JSON 字符串，
-            // AgentRunner 没机会像 CustomAgent 那样在 tool_result 后做 artifact 注入。
-            const val = result.value as { artifactId?: string } | null
-            if (val?.artifactId) {
-              const row = await db.query.artifacts.findFirst({
-                where: eq(schema.artifacts.id, val.artifactId),
-              })
-              if (row) {
-                eventBus.publish({
-                  type: 'artifact.create',
-                  conversationId: input.conversationId,
-                  timestamp: Date.now(),
-                  artifact: {
-                    id: row.id,
-                    conversationId: row.conversationId,
-                    type: row.type,
-                    title: row.title,
-                    content: row.content,
-                    version: row.version,
-                    parentArtifactId: row.parentArtifactId ?? undefined,
-                    createdByAgentId: row.createdByAgentId,
-                    createdAt: row.createdAt,
-                  },
-                })
-              }
-            }
+            // 不在这里 publish artifact.create —— 由 adapter 主循环检测到对应 tool_result 时
+            // 从 generator yield 出去，让 AgentRunner.consumeStream 触发 artifact_ref 注入。
             return {
               content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
             }
@@ -172,6 +171,10 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       ],
     })
 
+    // 同一 conversation 的多轮 query 共享 session（resume）—— 否则每轮都是新对话上下文，
+    // agent 就不记得上一轮说了什么。
+    const previousSessionId = claudeSessions.get(input.conversationId)
+
     const options: Options = {
       cwd: getEffectiveCwd(workspace),
       abortController: controller,
@@ -191,6 +194,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       settingSources: ['project'],
       permissionMode: 'default', // 自己 canUseTool 接管
       env: buildSdkEnv(input.apiKey, input.apiBaseUrl),
+      ...(previousSessionId ? { resume: previousSessionId } : {}),
       canUseTool: (toolName, toolInput) =>
         bridgePermission(toolName, toolInput, { workspace, approvalMode, input }),
     }
@@ -198,6 +202,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     try {
       const q = query({ prompt: input.prompt, options })
       for await (const m of q) {
+        // SDKSystemMessage init 携带 session_id —— 保存供下次 resume
+        if (m.type === 'system') {
+          const sid = (m as { session_id?: string }).session_id
+          if (sid) claudeSessions.set(input.conversationId, sid)
+          continue
+        }
+
         // partial streaming：includePartialMessages=true 时优先用这个推 delta
         if (m.type === 'stream_event') {
           const ev = m.event as { type?: string; delta?: { type?: string; text?: string } }
@@ -237,6 +248,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               activeTextPartIndex = -1
               const callId = newToolCallId()
               toolCallIdByUseId.set(block.id, callId)
+              toolNameByUseId.set(block.id, block.name)
               yield baseEvent({
                 type: 'tool.call' as const,
                 messageId,
@@ -280,6 +292,38 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
                 result: block.content ?? null,
                 isError: !!block.is_error,
               }) as StreamEvent
+
+              // 检测 agenthub MCP write_artifact 的成功结果 → 取出 artifact 并 yield artifact.create
+              // 让 AgentRunner.consumeStream 给当前 message 注入 artifact_ref part（产物卡片）
+              const toolName = toolNameByUseId.get(block.tool_use_id) ?? ''
+              if (
+                !block.is_error &&
+                (toolName === 'mcp__agenthub__write_artifact' ||
+                  toolName.endsWith('__write_artifact'))
+              ) {
+                const artifactId = parseArtifactIdFromMcpResult(block.content)
+                if (artifactId) {
+                  const row = await db.query.artifacts.findFirst({
+                    where: eq(schema.artifacts.id, artifactId),
+                  })
+                  if (row) {
+                    yield baseEvent({
+                      type: 'artifact.create' as const,
+                      artifact: {
+                        id: row.id,
+                        conversationId: row.conversationId,
+                        type: row.type,
+                        title: row.title,
+                        content: row.content,
+                        version: row.version,
+                        parentArtifactId: row.parentArtifactId ?? undefined,
+                        createdByAgentId: row.createdByAgentId,
+                        createdAt: row.createdAt,
+                      },
+                    }) as StreamEvent
+                  }
+                }
+              }
             }
           }
           continue
@@ -358,6 +402,29 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
  *  - 只配了 apiKey：当 ANTHROPIC_API_KEY 传给 SDK
  *  - 都没配：透传 process.env，SDK fallback 到 env / ~/.claude OAuth
  */
+function parseArtifactIdFromMcpResult(content: unknown): string | null {
+  // MCP tool_result.content 可能是字符串 / 数组 of {type:'text', text} / object
+  // 我们在 handler 里返回的是 [{type:'text', text: JSON.stringify(value)}]
+  const tryParse = (s: string): string | null => {
+    try {
+      const obj = JSON.parse(s) as { artifactId?: unknown }
+      return typeof obj.artifactId === 'string' ? obj.artifactId : null
+    } catch {
+      return null
+    }
+  }
+  if (typeof content === 'string') return tryParse(content)
+  if (Array.isArray(content)) {
+    for (const blk of content) {
+      if (blk && typeof blk === 'object' && 'text' in blk && typeof (blk as { text: unknown }).text === 'string') {
+        const r = tryParse((blk as { text: string }).text)
+        if (r) return r
+      }
+    }
+  }
+  return null
+}
+
 function buildSdkEnv(
   apiKey: string | null,
   apiBaseUrl: string | null,
