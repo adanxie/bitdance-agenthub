@@ -1,12 +1,22 @@
-import { AbortError, query, type Options } from '@anthropic-ai/claude-agent-sdk'
+import {
+  AbortError,
+  createSdkMcpServer,
+  query,
+  tool,
+  type Options,
+} from '@anthropic-ai/claude-agent-sdk'
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
 import type { WorkspaceRow } from '@/db/schema'
+import { eventBus } from '@/server/event-bus'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
 import { pendingWrites } from '@/server/pending-writes'
 import { findBannedPattern } from '@/server/security'
+import { toolRegistry } from '@/server/tools/registry'
+import type { ToolContext } from '@/server/tools/types'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 import type { StreamEvent } from '@/shared/types'
 
@@ -75,6 +85,93 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     let activeTextPartIndex = -1 // -1 表示当前没有开放的 text part
     const toolCallIdByUseId = new Map<string, string>()
 
+    const toolCtx: ToolContext = {
+      conversationId: input.conversationId,
+      workspacePath: getEffectiveCwd(workspace),
+      agentId: input.agentId,
+      runId: input.runId,
+      abortSignal: signal,
+    }
+    const agenthubMcpServer = createSdkMcpServer({
+      name: 'agenthub',
+      version: '1.0.0',
+      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片），用 read_artifact 读其他 Agent 的产物。',
+      tools: [
+        tool(
+          'write_artifact',
+          'Create a previewable artifact (web_app / document / image / code_file / diff) in the current conversation. Returns artifactId. Use this when the user asks for content that should be previewed in a card (e.g. 网页、长文档、图片) — NOT just for files in the workspace.',
+          {
+            type: z.enum(['web_app', 'document', 'image', 'code_file', 'diff']),
+            title: z.string(),
+            content: z.unknown(),
+          },
+          async (args) => {
+            const result = await toolRegistry.execute('write_artifact', args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            // 主动推 artifact.create 给前端 —— 否则 SDK 工具结果只是 JSON 字符串，
+            // AgentRunner 没机会像 CustomAgent 那样在 tool_result 后做 artifact 注入。
+            const val = result.value as { artifactId?: string } | null
+            if (val?.artifactId) {
+              const row = await db.query.artifacts.findFirst({
+                where: eq(schema.artifacts.id, val.artifactId),
+              })
+              if (row) {
+                eventBus.publish({
+                  type: 'artifact.create',
+                  conversationId: input.conversationId,
+                  timestamp: Date.now(),
+                  artifact: {
+                    id: row.id,
+                    conversationId: row.conversationId,
+                    type: row.type,
+                    title: row.title,
+                    content: row.content,
+                    version: row.version,
+                    parentArtifactId: row.parentArtifactId ?? undefined,
+                    createdByAgentId: row.createdByAgentId,
+                    createdAt: row.createdAt,
+                  },
+                })
+              }
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
+            }
+          },
+        ),
+        tool(
+          'read_artifact',
+          'Read the full content of an existing artifact in the current conversation by id.',
+          { artifactId: z.string() },
+          async (args) => {
+            const result = await toolRegistry.execute('read_artifact', args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    typeof result.value === 'string'
+                      ? result.value
+                      : JSON.stringify(result.value),
+                },
+              ],
+            }
+          },
+        ),
+      ],
+    })
+
     const options: Options = {
       cwd: getEffectiveCwd(workspace),
       abortController: controller,
@@ -85,6 +182,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         append: input.systemPrompt,
       },
       tools: { type: 'preset', preset: 'claude_code' },
+      mcpServers: { agenthub: agenthubMcpServer },
       includePartialMessages: true,
       // 'project' = 只读绑定目录里的 CLAUDE.md（项目级上下文），不读用户全局 ~/.claude 设定（避免污染）
       settingSources: ['project'],

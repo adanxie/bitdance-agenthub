@@ -1,6 +1,6 @@
 'use client'
 
-import { Paperclip, Send, Shield, Square, X, Zap } from 'lucide-react'
+import { Paperclip, Send, Shield, Sparkles, Square, X, Zap } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -53,6 +53,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const replyTargetId = useAppStore((s) => s.replyTargetByConv[conversationId])
   const replyMessage = useAppStore((s) => (replyTargetId ? s.messages[replyTargetId] : null))
   const setReplyTarget = useAppStore((s) => s.setReplyTarget)
+  const pendingQuote = useAppStore((s) => s.pendingQuoteForInput)
+  const setPendingQuote = useAppStore((s) => s.setPendingQuote)
+
+  // 拿到 pendingQuote 后聚焦输入框，方便用户立刻输指令
+  useEffect(() => {
+    if (pendingQuote) textareaRef.current?.focus()
+  }, [pendingQuote])
 
   const isGroup = conversation?.mode === 'group'
 
@@ -208,12 +215,17 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     const hasAttachments = pending.length > 0
     if ((!text && !hasAttachments) || sending || isRunning) return
 
+    // 选区改写：把 pendingQuote 注入消息开头（XML 块给 LLM 当上下文）
+    const finalContent = pendingQuote
+      ? `<quoted_selection source="${pendingQuote.sourceLabel}">\n${pendingQuote.text}\n</quoted_selection>\n\n${text}`
+      : text
+
     const tempId = `temp_${nanoid()}`
     const parentId = replyTargetId ?? undefined
     addLocalUserMessage({
       tempId,
       conversationId,
-      content: text,
+      content: finalContent,
       mentionedAgentIds: mentionedIds,
       parentMessageId: parentId,
       attachments: pending,
@@ -221,6 +233,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setContent('')
     setMentionedIds([])
     setTrigger(null)
+    if (pendingQuote) setPendingQuote(null)
     const attachmentIds = pending.map((a) => a.id)
     clearPendingAttachments(conversationId)
     if (replyTargetId) setReplyTarget(conversationId, null)
@@ -228,7 +241,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
     try {
       const { messageId } = await sendMessageAPI(conversationId, {
-        content: text,
+        content: finalContent,
         mentionedAgentIds: mentionedIds,
         parentMessageId: parentId,
         attachmentIds,
@@ -276,6 +289,30 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
             variant="compose"
             onDismiss={() => setReplyTarget(conversationId, null)}
           />
+        </div>
+      )}
+
+      {/* 选区改写引用块 */}
+      {pendingQuote && (
+        <div className="mb-2 flex items-start gap-2 rounded-md border border-[#3370FF]/30 bg-[#3370FF]/5 px-2 py-1.5 text-xs">
+          <Sparkles className="mt-0.5 size-3 shrink-0 text-[#3370FF]" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-[#3370FF]">改写 · {pendingQuote.sourceLabel}</div>
+            <pre className="mt-0.5 line-clamp-3 whitespace-pre-wrap break-words font-mono text-[10px] text-muted-foreground">
+              {pendingQuote.text}
+            </pre>
+            <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+              在下方输入框写改写指令，发送时会作为引用一起发给 Agent
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPendingQuote(null)}
+            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="取消引用"
+          >
+            <X className="size-3" />
+          </button>
         </div>
       )}
 

@@ -144,15 +144,26 @@ export function ArtifactPreviewPanel() {
 function ArtifactView({ artifact }: { artifact: ArtifactRow }) {
   const content = artifact.content as ArtifactContent
 
+  // 用 data-selection-target 标记容器：SelectionPopover 会响应这里的文字选择
+  const wrap = (children: React.ReactNode) => (
+    <div
+      data-selection-target="artifact"
+      data-selection-label={`产物「${artifact.title}」 v${artifact.version}`}
+      className="contents"
+    >
+      {children}
+    </div>
+  )
+
   switch (content.type) {
     case 'web_app':
-      return <WebAppView content={content} />
+      return wrap(<WebAppView content={content} />)
     case 'document':
-      return <DocumentView content={content} />
+      return wrap(<DocumentView content={content} />)
     case 'image':
       return <ImageView content={content} />
     case 'code_file':
-      return <CodeFileView content={content} />
+      return wrap(<CodeFileView content={content} />)
     case 'diff':
       return (
         <Empty>

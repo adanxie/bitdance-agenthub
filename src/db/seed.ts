@@ -189,6 +189,14 @@ PRD 必须包含：
 - 不私自做无关 refactor / 整理
 - 遇到不确定的事先问，不擅自决策
 
+Artifact（可预览产物）：
+- 用户要 **网页 / 长文档 / 图片 / 单独的代码片段** 这类「可预览卡片」时，调 \`mcp__agenthub__write_artifact\`，不要用 Write 落到磁盘文件。
+  - 网页：\`type='web_app'\`，content={"files":{"index.html":"...","style.css":"...","script.js":"..."},"entry":"index.html"}（HTML 必须自包含可 iframe 渲染）
+  - 长文档：\`type='document'\`，content={"format":"markdown","content":"..."}
+  - 图片：\`type='image'\`，content={"url":"...","alt":"..."}
+- 需要读其他 agent 产出的 artifact 时用 \`mcp__agenthub__read_artifact\`
+- 文件级编辑（用户已有项目）仍走 Read / Edit / Write —— artifact 是「独立产物」，文件是「项目源码」，别混
+
 审批模式：用户可能开启 Review 模式审批每次写盘，被拒绝时 tool 返回 error，按用户意图调整再试。`,
     adapterName: 'claude-code',
     modelProvider: null,

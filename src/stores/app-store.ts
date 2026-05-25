@@ -48,6 +48,9 @@ interface AppState {
   // ─── 引用回复目标（按 conversationId 分桶）───────
   replyTargetByConv: Record<string, string | null>
 
+  // ─── 选区改写：等待注入到 MessageInput 的引用块（全局，不分会话） ─
+  pendingQuoteForInput: { text: string; sourceLabel: string } | null
+
   // ─── 待发送的附件（按 conversationId 分桶）。文件库和 MessageInput 共享。
   pendingAttachmentsByConv: Record<string, AttachmentRow[]>
 
@@ -93,6 +96,8 @@ interface AppState {
   setActiveTab(conversationId: string, tab: string): void
 
   setReplyTarget(conversationId: string, messageId: string | null): void
+
+  setPendingQuote(quote: { text: string; sourceLabel: string } | null): void
 
   setBookmarkedMessageIds(conversationId: string, ids: string[]): void
 
@@ -141,6 +146,7 @@ export const useAppStore = create<AppState>()(
     pendingWritesByConv: {},
     unreadByConv: {},
     mobileSidebarOpen: false,
+    pendingQuoteForInput: null,
     highlightedMessageId: null,
     streamConnected: false,
 
@@ -210,6 +216,11 @@ export const useAppStore = create<AppState>()(
     setMobileSidebarOpen: (open) =>
       set((s) => {
         s.mobileSidebarOpen = open
+      }),
+
+    setPendingQuote: (quote) =>
+      set((s) => {
+        s.pendingQuoteForInput = quote
       }),
 
     openArtifactPreview: (artifactId) =>

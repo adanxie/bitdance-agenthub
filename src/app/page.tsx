@@ -1,6 +1,7 @@
 import { ArtifactPreviewPanel } from '@/components/artifact-preview-panel'
 import { ChatPanel } from '@/components/chat-panel'
 import { FileExplorerPanel } from '@/components/file-explorer-panel'
+import { SelectionPopover } from '@/components/selection-popover'
 import { Sidebar } from '@/components/sidebar'
 
 export default function Home() {
@@ -10,6 +11,7 @@ export default function Home() {
       <ChatPanel />
       <FileExplorerPanel />
       <ArtifactPreviewPanel />
+      <SelectionPopover />
     </div>
   )
 }

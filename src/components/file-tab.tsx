@@ -163,7 +163,11 @@ export function FileTab({
       </div>
 
       {/* 主体 */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        className="min-h-0 flex-1 overflow-auto"
+        data-selection-target={editing ? undefined : 'file'}
+        data-selection-label={`文件 ${relPath}`}
+      >
         {editing ? (
           <textarea
             value={state.draft}
