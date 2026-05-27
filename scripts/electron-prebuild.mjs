@@ -35,10 +35,19 @@ copyIfExists(
   'copied public → standalone/',
 )
 
-// 清理 broken symlinks。Next standalone 的 file tracer 只拷贝实际被 require 的包，
-// 但 pnpm 的 .pnpm/node_modules/<pkg> hoist 入口可能指向未被拷贝的旧版本（典型：
-// .pnpm/node_modules/semver -> ../semver@6.3.1/...，而 standalone 只带了 semver@7.8.1）。
-// 这些链接运行时无害（没代码 require 缺失版本），但 electron-builder 打包阶段 stat 会 ENOENT。
+// 清理两类有害 symlink，electron-builder 打包时都会被 7-zip stat / 解引用，标准化失败 → 整个 build 中断：
+//   (a) 链接目标不存在（pnpm hoist 入口指向未被 standalone 拷贝的旧版本，例如
+//       .pnpm/node_modules/semver -> ../semver@6.3.1/...，而 standalone 只带了 semver@7.8.1）
+//   (b) 链接目标是绝对路径且落在 standalone 树之外（Next.js file tracer 在
+//       .next/standalone/.next/node_modules/<pkg>-<hash> 留下指向源仓库 .pnpm 真身的绝对 symlink）。
+//       这些链接 fs.statSync 能跑通，但 7-zip 打包时会触发「系统找不到指定的路径」。
+const isWin = process.platform === 'win32'
+const standaloneKey = isWin ? path.resolve(standaloneDir).toLowerCase() : path.resolve(standaloneDir)
+function isOutsideStandalone(absTarget) {
+  const key = isWin ? path.resolve(absTarget).toLowerCase() : path.resolve(absTarget)
+  return key !== standaloneKey && !key.startsWith(standaloneKey + path.sep)
+}
+
 const broken = []
 function scan(dir) {
   let entries
@@ -50,9 +59,22 @@ function scan(dir) {
   for (const entry of entries) {
     const p = path.join(dir, entry.name)
     if (entry.isSymbolicLink()) {
+      // (a) dangling
       try {
         fs.statSync(p)
       } catch {
+        broken.push(p)
+        continue
+      }
+      // (b) absolute target pointing outside standalone
+      try {
+        const target = fs.readlinkSync(p)
+        const resolved = path.isAbsolute(target) ? target : path.resolve(path.dirname(p), target)
+        if (isOutsideStandalone(resolved)) {
+          broken.push(p)
+        }
+      } catch {
+        // readlink 失败的当 dangling 处理
         broken.push(p)
       }
     } else if (entry.isDirectory()) {
@@ -68,7 +90,7 @@ for (const link of broken) {
     // ignore；下一个步骤可能会再处理
   }
 }
-console.log(`✓ removed ${broken.length} broken symlink(s)`)
+console.log(`✓ removed ${broken.length} broken / out-of-tree symlink(s)`)
 
 
 
