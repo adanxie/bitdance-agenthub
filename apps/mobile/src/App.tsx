@@ -252,7 +252,7 @@ export function App() {
               <p>
                 {snapshot
                   ? `${snapshot.conversations.length} 个会话 · ${snapshot.runningRuns.length} 个运行中`
-                  : '等待桌面端 snapshot'}
+                  : '数据同步中'}
               </p>
             </div>
           </aside>

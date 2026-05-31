@@ -27,10 +27,7 @@ export function StatusScreen({
     <div className="screen-stack">
       <section className="panel hero-panel">
         <div>
-          <h2>{connected ? '桌面端连接已配置' : '连接桌面端 AgentHub'}</h2>
-          <p>
-            手机 App 作为 companion client，只负责观察、审批和反馈；Agent、工具和 workspace 仍在桌面端执行。
-          </p>
+          <h2>{connected ? '桌面端已连接' : '请连接桌面端'}</h2>
         </div>
         <button type="button" className="primary-action" onClick={connected ? onRefresh : onOpenSettings}>
           {connected ? (
@@ -84,7 +81,7 @@ export function StatusScreen({
             </button>
           ))
         ) : (
-          <EmptyState text={connected ? '暂无 snapshot 数据。' : '配对后会显示桌面端状态。'} />
+          <EmptyState text={connected ? '数据同步中' : '请先连接桌面端'} />
         )}
       </section>
     </div>

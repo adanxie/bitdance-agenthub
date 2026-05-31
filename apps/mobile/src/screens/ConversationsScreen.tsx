@@ -129,7 +129,7 @@ export function ConversationsScreen({
           </button>
         ))
       ) : (
-        <div className="empty-state">暂无会话。刷新 snapshot 后会显示桌面端会话列表。</div>
+        <div className="empty-state">数据同步中</div>
       )}
     </section>
   )
