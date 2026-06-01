@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { createServer } from 'node:net'
+import fs from 'node:fs'
 import path from 'node:path'
 
 /**
@@ -11,10 +12,17 @@ import path from 'node:path'
  * - 探活直到 HEAD / 返回 < 500，最多 15s
  */
 export async function startEmbeddedServer(): Promise<number> {
-  const port = await getFreePort()
+  const companion = readCompanionConfig()
+  const enabled = companion.companionMode !== 'off' && !!companion.mobileDeviceToken
+  const hostname = enabled ? '0.0.0.0' : '127.0.0.1'
+  const port = enabled ? companion.companionPort : await getFreePort('127.0.0.1')
+
   process.env.PORT = String(port)
-  process.env.HOSTNAME = '127.0.0.1'
+  process.env.HOSTNAME = hostname
   process.env.NEXT_TELEMETRY_DISABLED = '1'
+  if (enabled && companion.mobileDeviceToken) {
+    process.env.AGENTHUB_MOBILE_TOKEN = companion.mobileDeviceToken
+  }
 
   // app.getAppPath() 在打包模式下指向 app.asar；但 Next standalone 的 server.js
   // 入口第一行就 process.chdir(__dirname)，chdir 是真实文件系统系统调用，跨不进 asar。
@@ -33,6 +41,7 @@ export async function startEmbeddedServer(): Promise<number> {
 
   // 用 require 触发 listen；server.js 是 Next 生成的 CommonJS 入口
   // 注意：在 ESM 上下文里要换 createRequire；当前 main 是 CJS（tsconfig module=commonjs），可直接用
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require(standaloneEntry)
 
   await waitUntilReady(`http://127.0.0.1:${port}/`)
@@ -40,12 +49,12 @@ export async function startEmbeddedServer(): Promise<number> {
 }
 
 /** 从系统拿一个 ephemeral 端口（监听 :0 → 读 actual port → close）。 */
-function getFreePort(): Promise<number> {
+function getFreePort(host: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer()
     probe.unref()
     probe.on('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
+    probe.listen(0, host, () => {
       const addr = probe.address()
       if (addr && typeof addr === 'object') {
         const port = addr.port
@@ -56,6 +65,35 @@ function getFreePort(): Promise<number> {
       }
     })
   })
+}
+
+interface CompanionConfig {
+  companionMode?: 'off' | 'lan' | 'tailnet'
+  mobileDeviceToken?: string | null
+  companionPort?: number
+}
+
+function readCompanionConfig(): Required<CompanionConfig> {
+  const fallback: Required<CompanionConfig> = {
+    companionMode: 'off',
+    mobileDeviceToken: null,
+    companionPort: 60646,
+  }
+
+  const dataDir = process.env.AGENTHUB_DATA_DIR
+  if (!dataDir) return fallback
+
+  try {
+    const raw = fs.readFileSync(path.join(dataDir, 'companion.json'), 'utf8')
+    const parsed = JSON.parse(raw) as CompanionConfig
+    return {
+      companionMode: parsed.companionMode ?? fallback.companionMode,
+      mobileDeviceToken: parsed.mobileDeviceToken ?? null,
+      companionPort: parsed.companionPort ?? fallback.companionPort,
+    }
+  } catch {
+    return fallback
+  }
 }
 
 /** 探活：每 200ms 打一次 HEAD；server 起来或超时（默认 15s）才返回。 */

@@ -16,6 +16,8 @@ const PatchBody = z.object({
   openaiApiKey: z.string().nullable().optional(),
   deepseekApiKey: z.string().nullable().optional(),
   arkApiKey: z.string().nullable().optional(),
+  companionMode: z.enum(['off', 'lan', 'tailnet']).optional(),
+  mobileDeviceToken: z.string().nullable().optional(),
 })
 
 /** PATCH /api/settings —— upsert 部分字段 */

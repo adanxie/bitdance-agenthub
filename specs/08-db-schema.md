@@ -209,6 +209,8 @@ app_settings {
   openai_api_key      text                // OpenAI provider
   deepseek_api_key    text                // DeepSeek provider
   ark_api_key         text                // 火山方舟 provider
+  companion_mode      text NOT NULL       // 'off' | 'lan' | 'tailnet'，默认 'off'
+  mobile_device_token text                // 移动端 P0 设备 token；后续替换为 device_sessions
   updated_at          int  NOT NULL
 }
 ```

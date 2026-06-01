@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Home, Menu, Settings, X } from 'lucide-react'
 
 import { createMobileApiClient } from './api/client'
@@ -6,7 +6,7 @@ import { ApprovalsScreen } from './screens/ApprovalsScreen'
 import { ConversationsScreen } from './screens/ConversationsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { StatusScreen } from './screens/StatusScreen'
-import { loadConnection, saveConnection } from './storage/connection'
+import { loadConnection, loadRecentHosts, rememberRecentHost, saveConnection } from './storage/connection'
 import type {
   ConnectionConfig,
   MobileAskUserAnswers,
@@ -15,6 +15,7 @@ import type {
 } from './types'
 
 const initialConnection = loadConnection()
+const initialRecentHosts = loadRecentHosts()
 
 type AppView = 'home' | 'settings'
 
@@ -22,6 +23,8 @@ export function App() {
   const [activeView, setActiveView] = useState<AppView>('home')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [connection, setConnection] = useState<ConnectionConfig>(initialConnection)
+  const [recentHosts, setRecentHosts] = useState<string[]>(initialRecentHosts)
+  const [lastSuccessfulConnection, setLastSuccessfulConnection] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null)
   const [conversationDetail, setConversationDetail] = useState<MobileConversationDetail | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
@@ -30,21 +33,33 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
 
   const api = useMemo(() => createMobileApiClient(connection), [connection])
-  const connected = !!connection.baseUrl && !!connection.deviceToken
+  const configured = !!normalizeBaseUrl(connection.baseUrl) && !!connection.deviceToken.trim()
+  const connectionFingerprint = `${normalizeBaseUrl(connection.baseUrl)}\n${connection.deviceToken.trim()}`
+  const connectionOk = configured && lastSuccessfulConnection === connectionFingerprint
+
+  const recordSnapshotSuccess = useCallback(
+    (next: MobileSnapshot) => {
+      setSnapshot(next)
+      setLastSuccessfulConnection(connectionFingerprint)
+      setRecentHosts(rememberRecentHost(connection.baseUrl))
+      setError(null)
+    },
+    [connection.baseUrl, connectionFingerprint],
+  )
 
   useEffect(() => {
     saveConnection(connection)
   }, [connection])
 
   useEffect(() => {
-    if (!connected || activeView === 'settings') return
+    if (!configured || activeView === 'settings') return
 
     let cancelled = false
 
     async function refreshMobileSnapshot() {
       try {
         const next = await api.getSnapshot()
-        if (!cancelled) setSnapshot(next)
+        if (!cancelled) recordSnapshotSuccess(next)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }
@@ -58,10 +73,10 @@ export function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [activeView, api, connected])
+  }, [activeView, api, configured, recordSnapshotSuccess])
 
   useEffect(() => {
-    if (!connected || !selectedConversationId) return
+    if (!configured || !selectedConversationId) return
 
     let cancelled = false
     const conversationId = selectedConversationId
@@ -69,7 +84,10 @@ export function App() {
     async function refreshConversationDetail() {
       try {
         const next = await api.getConversation(conversationId)
-        if (!cancelled) setConversationDetail(next)
+        if (!cancelled) {
+          setConversationDetail(next)
+          setLastSuccessfulConnection(connectionFingerprint)
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }
@@ -83,10 +101,10 @@ export function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [api, connected, selectedConversationId])
+  }, [api, configured, selectedConversationId, connectionFingerprint])
 
   async function refreshSnapshot() {
-    if (!connected) {
+    if (!configured) {
       setError('请先在设置里填写桌面端地址和设备 token。')
       return
     }
@@ -94,7 +112,7 @@ export function App() {
     setError(null)
     try {
       const next = await api.getSnapshot()
-      setSnapshot(next)
+      recordSnapshotSuccess(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -103,7 +121,7 @@ export function App() {
   }
 
   async function runMobileAction(id: string, action: () => Promise<void>) {
-    if (!connected) {
+    if (!configured) {
       setError('请先在设置里填写桌面端地址和设备 token。')
       return
     }
@@ -111,7 +129,7 @@ export function App() {
     setError(null)
     try {
       await action()
-      setSnapshot(await api.getSnapshot())
+      recordSnapshotSuccess(await api.getSnapshot())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -120,7 +138,7 @@ export function App() {
   }
 
   async function openConversation(id: string) {
-    if (!connected) {
+    if (!configured) {
       setError('请先在设置里填写桌面端地址和设备 token。')
       return
     }
@@ -131,6 +149,7 @@ export function App() {
     setError(null)
     try {
       setConversationDetail(await api.getConversation(id))
+      setLastSuccessfulConnection(connectionFingerprint)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -164,7 +183,7 @@ export function App() {
 
   const content = selectedConversationId ? (
       <ConversationsScreen
-        connected={connected}
+        connected={configured}
         loading={loading}
         snapshot={snapshot}
         detail={conversationDetail}
@@ -177,13 +196,16 @@ export function App() {
         connection={connection}
         loading={loading}
         error={error}
+        connectionOk={connectionOk}
+        recentHosts={recentHosts}
         onChange={setConnection}
+        onSelectHost={(baseUrl) => setConnection((current) => ({ ...current, baseUrl }))}
         onTest={() => void refreshSnapshot()}
       />
     ) : (
       <div className="screen-stack">
         <StatusScreen
-          connected={connected}
+          connected={connectionOk}
           loading={loading}
           error={error}
           snapshot={snapshot}
@@ -193,7 +215,7 @@ export function App() {
         />
         {hasPending && (
           <ApprovalsScreen
-            connected={connected}
+            connected={configured}
             busyId={operationId}
             snapshot={snapshot}
             onWriteDecision={(id, action) =>
@@ -235,19 +257,27 @@ export function App() {
             </div>
 
             <div className="drawer-section">
-              <button type="button" className="drawer-item active" onClick={openHome}>
+              <button
+                type="button"
+                className={`drawer-item ${activeView === 'home' ? 'active' : ''}`}
+                onClick={openHome}
+              >
                 <Home className="drawer-icon" aria-hidden="true" />
                 主页
               </button>
-              <button type="button" className="drawer-item" onClick={openSettings}>
+              <button
+                type="button"
+                className={`drawer-item ${activeView === 'settings' ? 'active' : ''}`}
+                onClick={openSettings}
+              >
                 <Settings className="drawer-icon" aria-hidden="true" />
                 设置
               </button>
             </div>
 
             <div className="drawer-status">
-              <span className={connected ? 'status-pill online' : 'status-pill'}>
-                {connected ? '已配置' : '未配对'}
+              <span className={connectionOk ? 'status-pill online' : 'status-pill'}>
+                {connectionOk ? '已连接' : configured ? '已配置' : '未配对'}
               </span>
               <p>
                 {snapshot
@@ -260,4 +290,8 @@ export function App() {
       )}
     </main>
   )
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '')
 }

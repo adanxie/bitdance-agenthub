@@ -133,6 +133,8 @@ const DDL: string[] = [
     openai_api_key TEXT,
     deepseek_api_key TEXT,
     ark_api_key TEXT,
+    companion_mode TEXT NOT NULL DEFAULT 'off',
+    mobile_device_token TEXT,
     updated_at INTEGER NOT NULL
   )`,
 ]
@@ -141,6 +143,17 @@ const DDL: string[] = [
 function ensureSchema(sqlite: Database.Database): void {
   for (const stmt of DDL) {
     sqlite.exec(stmt)
+  }
+  safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN companion_mode TEXT NOT NULL DEFAULT 'off'`)
+  safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN mobile_device_token TEXT`)
+}
+
+function safeAlter(sqlite: Database.Database, stmt: string): void {
+  try {
+    sqlite.exec(stmt)
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('duplicate column name')) return
+    throw err
   }
 }
 

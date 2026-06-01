@@ -30,6 +30,15 @@ if (!fs.existsSync(standaloneDir)) {
   process.exit(1)
 }
 
+// Next tracer 在遇到非常动态的 server import 时可能把 repo 级生成物也带进 standalone。
+// Electron Builder 会递归签名 .app/.framework，旧 release 一旦被嵌进去就会导致 codesign 崩。
+for (const relativePath of ['release', '.agenthub-data', 'apps']) {
+  const target = path.join(standaloneDir, relativePath)
+  if (!fs.existsSync(target)) continue
+  fs.rmSync(target, { recursive: true, force: true })
+  console.log(`✓ removed traced ${relativePath} from standalone`)
+}
+
 // ─── A: 静态资源 ─────────────────────────────────────────
 function copyIfExists(src, dest, label) {
   if (!fs.existsSync(src)) return

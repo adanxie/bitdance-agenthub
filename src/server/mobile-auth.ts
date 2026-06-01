@@ -6,13 +6,15 @@ import type { NextResponse } from 'next/server'
 import { mobileJson } from './mobile-cors'
 
 const MOBILE_DEV_TOKEN_ENV = 'AGENTHUB_MOBILE_DEV_TOKEN'
+const MOBILE_TOKEN_ENV = 'AGENTHUB_MOBILE_TOKEN'
 
 export function requireMobileAuth(req: NextRequest): NextResponse | null {
-  const expectedToken = process.env[MOBILE_DEV_TOKEN_ENV]?.trim()
+  const expectedToken =
+    process.env[MOBILE_TOKEN_ENV]?.trim() ?? process.env[MOBILE_DEV_TOKEN_ENV]?.trim()
   if (!expectedToken) {
     return mobileJson(
       req,
-      { error: `${MOBILE_DEV_TOKEN_ENV} is not configured on the desktop host` },
+      { error: 'Mobile companion is not configured on the desktop host' },
       { status: 503 },
     )
   }

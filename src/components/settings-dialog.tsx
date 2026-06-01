@@ -1,6 +1,20 @@
 'use client'
 
-import { Eye, EyeOff, Loader2, Settings as SettingsIcon } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  Clipboard,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Monitor,
+  Network,
+  Power,
+  RotateCw,
+  Settings as SettingsIcon,
+  Smartphone,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -14,7 +28,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { AppSettingsRow } from '@/db/schema'
-import { fetchAppSettings, updateAppSettings, type AppSettingsPatchBody } from '@/lib/api'
+import {
+  fetchAppSettings,
+  fetchConnectionHints,
+  regenerateMobileDeviceToken,
+  updateAppSettings,
+  type AppSettingsPatchBody,
+  type ConnectionHint,
+} from '@/lib/api'
 
 interface SettingsForm {
   anthropicApiKey: string
@@ -22,6 +43,8 @@ interface SettingsForm {
   openaiApiKey: string
   deepseekApiKey: string
   arkApiKey: string
+  companionMode: 'off' | 'lan' | 'tailnet'
+  mobileDeviceToken: string
 }
 
 /**
@@ -41,12 +64,19 @@ export function SettingsDialog({
 }) {
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [hintsLoading, setHintsLoading] = useState(false)
+  const [tokenBusy, setTokenBusy] = useState(false)
+  const [restartRequired, setRestartRequired] = useState(false)
+  const [connectionHints, setConnectionHints] = useState<ConnectionHint[]>([])
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const [form, setForm] = useState<SettingsForm>({
     anthropicApiKey: '',
     anthropicBaseUrl: '',
     openaiApiKey: '',
     deepseekApiKey: '',
     arkApiKey: '',
+    companionMode: 'off',
+    mobileDeviceToken: '',
   })
   const [reveal, setReveal] = useState<Record<keyof SettingsForm, boolean>>({
     anthropicApiKey: false,
@@ -54,15 +84,55 @@ export function SettingsDialog({
     openaiApiKey: false,
     deepseekApiKey: false,
     arkApiKey: false,
+    companionMode: true,
+    mobileDeviceToken: false,
   })
 
   useEffect(() => {
     if (!open) return
-    setLoading(true)
-    fetchAppSettings()
-      .then((s) => setForm(rowToForm(s)))
+    let cancelled = false
+
+    void Promise.resolve()
+      .then(() => {
+        if (!cancelled) {
+          setRestartRequired(false)
+          setLoading(true)
+        }
+        return fetchAppSettings()
+      })
+      .then((s) => {
+        if (!cancelled) setForm(rowToForm(s))
+      })
       .catch((err) => console.error('[SettingsDialog] load failed', err))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+
+    void Promise.resolve()
+      .then(() => {
+        if (!cancelled) setHintsLoading(true)
+        return fetchConnectionHints()
+      })
+      .then((hints) => {
+        if (!cancelled) setConnectionHints(hints)
+      })
+      .catch((err) => console.error('[SettingsDialog] load connection hints failed', err))
+      .finally(() => {
+        if (!cancelled) setHintsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [open])
 
   const handleSave = async () => {
@@ -76,6 +146,8 @@ export function SettingsDialog({
         openaiApiKey: form.openaiApiKey.trim() || null,
         deepseekApiKey: form.deepseekApiKey.trim() || null,
         arkApiKey: form.arkApiKey.trim() || null,
+        companionMode: form.companionMode,
+        mobileDeviceToken: form.mobileDeviceToken.trim() || null,
       }
       await updateAppSettings(patch)
       onOpenChange(false)
@@ -86,9 +158,75 @@ export function SettingsDialog({
     }
   }
 
+  const handleCopyHint = async (hint: ConnectionHint) => {
+    try {
+      await navigator.clipboard.writeText(hint.url)
+      setCopiedUrl(hint.url)
+      window.setTimeout(() => setCopiedUrl(null), 1200)
+    } catch (err) {
+      console.error('[SettingsDialog] copy connection hint failed', err)
+    }
+  }
+
+  const handleCopyText = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedUrl(value)
+      window.setTimeout(() => setCopiedUrl(null), 1200)
+    } catch (err) {
+      console.error('[SettingsDialog] copy text failed', err)
+    }
+  }
+
+  const handleEnableCompanion = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const next = await updateAppSettings({
+        companionMode: 'tailnet',
+        mobileDeviceToken: form.mobileDeviceToken.trim() || null,
+      })
+      setForm(rowToForm(next))
+      setConnectionHints(await fetchConnectionHints())
+      setRestartRequired(true)
+    } catch (err) {
+      console.error('[SettingsDialog] enable companion failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDisableCompanion = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const next = await updateAppSettings({ companionMode: 'off' })
+      setForm(rowToForm(next))
+      setConnectionHints(await fetchConnectionHints())
+      setRestartRequired(true)
+    } catch (err) {
+      console.error('[SettingsDialog] disable companion failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRegenerateToken = async () => {
+    if (tokenBusy) return
+    setTokenBusy(true)
+    try {
+      const next = await regenerateMobileDeviceToken()
+      setForm(rowToForm(next))
+    } catch (err) {
+      console.error('[SettingsDialog] regenerate mobile token failed', err)
+    } finally {
+      setTokenBusy(false)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="grid max-h-[calc(100vh-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>API 设置</DialogTitle>
           <DialogDescription>
@@ -97,51 +235,71 @@ export function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {loading ? (
-          <div className="flex h-32 items-center justify-center">
-            <Loader2 className="size-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4 py-2">
-            <KeyField
-              label="Anthropic API Key"
-              hint="用于 Claude Code adapter / custom anthropic provider。"
-              value={form.anthropicApiKey}
-              reveal={reveal.anthropicApiKey}
-              onChange={(v) => setForm((f) => ({ ...f, anthropicApiKey: v }))}
-              onToggleReveal={() => setReveal((r) => ({ ...r, anthropicApiKey: !r.anthropicApiKey }))}
-            />
-            <KeyField
-              label="Anthropic Base URL（可选）"
-              hint="走第三方网关时填，如 https://anyrouter.top；留空走官方 endpoint。"
-              type="text"
-              value={form.anthropicBaseUrl}
-              reveal
-              onChange={(v) => setForm((f) => ({ ...f, anthropicBaseUrl: v }))}
-            />
-            <KeyField
-              label="OpenAI API Key"
-              value={form.openaiApiKey}
-              reveal={reveal.openaiApiKey}
-              onChange={(v) => setForm((f) => ({ ...f, openaiApiKey: v }))}
-              onToggleReveal={() => setReveal((r) => ({ ...r, openaiApiKey: !r.openaiApiKey }))}
-            />
-            <KeyField
-              label="DeepSeek API Key"
-              value={form.deepseekApiKey}
-              reveal={reveal.deepseekApiKey}
-              onChange={(v) => setForm((f) => ({ ...f, deepseekApiKey: v }))}
-              onToggleReveal={() => setReveal((r) => ({ ...r, deepseekApiKey: !r.deepseekApiKey }))}
-            />
-            <KeyField
-              label="Volcano Ark API Key"
-              value={form.arkApiKey}
-              reveal={reveal.arkApiKey}
-              onChange={(v) => setForm((f) => ({ ...f, arkApiKey: v }))}
-              onToggleReveal={() => setReveal((r) => ({ ...r, arkApiKey: !r.arkApiKey }))}
-            />
-          </div>
-        )}
+        <div className="min-h-0 overflow-y-auto pr-1">
+          {loading ? (
+            <div className="flex h-32 items-center justify-center">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-5 py-2">
+              <MobileConnectionHints
+                hints={connectionHints}
+                loading={hintsLoading}
+                copiedUrl={copiedUrl}
+                companionMode={form.companionMode}
+                mobileDeviceToken={form.mobileDeviceToken}
+                busy={busy}
+                tokenBusy={tokenBusy}
+                restartRequired={restartRequired}
+                onCopy={(hint) => void handleCopyHint(hint)}
+                onCopyText={(value) => void handleCopyText(value)}
+                onEnable={() => void handleEnableCompanion()}
+                onDisable={() => void handleDisableCompanion()}
+                onRegenerateToken={() => void handleRegenerateToken()}
+              />
+
+              <KeyField
+                label="Anthropic API Key"
+                hint="用于 Claude Code adapter / custom anthropic provider。"
+                value={form.anthropicApiKey}
+                reveal={reveal.anthropicApiKey}
+                onChange={(v) => setForm((f) => ({ ...f, anthropicApiKey: v }))}
+                onToggleReveal={() =>
+                  setReveal((r) => ({ ...r, anthropicApiKey: !r.anthropicApiKey }))
+                }
+              />
+              <KeyField
+                label="Anthropic Base URL（可选）"
+                hint="走第三方网关时填，如 https://anyrouter.top；留空走官方 endpoint。"
+                type="text"
+                value={form.anthropicBaseUrl}
+                reveal
+                onChange={(v) => setForm((f) => ({ ...f, anthropicBaseUrl: v }))}
+              />
+              <KeyField
+                label="OpenAI API Key"
+                value={form.openaiApiKey}
+                reveal={reveal.openaiApiKey}
+                onChange={(v) => setForm((f) => ({ ...f, openaiApiKey: v }))}
+                onToggleReveal={() => setReveal((r) => ({ ...r, openaiApiKey: !r.openaiApiKey }))}
+              />
+              <KeyField
+                label="DeepSeek API Key"
+                value={form.deepseekApiKey}
+                reveal={reveal.deepseekApiKey}
+                onChange={(v) => setForm((f) => ({ ...f, deepseekApiKey: v }))}
+                onToggleReveal={() => setReveal((r) => ({ ...r, deepseekApiKey: !r.deepseekApiKey }))}
+              />
+              <KeyField
+                label="Volcano Ark API Key"
+                value={form.arkApiKey}
+                reveal={reveal.arkApiKey}
+                onChange={(v) => setForm((f) => ({ ...f, arkApiKey: v }))}
+                onToggleReveal={() => setReveal((r) => ({ ...r, arkApiKey: !r.arkApiKey }))}
+              />
+            </div>
+          )}
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
@@ -154,6 +312,165 @@ export function SettingsDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function MobileConnectionHints({
+  hints,
+  loading,
+  copiedUrl,
+  companionMode,
+  mobileDeviceToken,
+  busy,
+  tokenBusy,
+  restartRequired,
+  onCopy,
+  onCopyText,
+  onEnable,
+  onDisable,
+  onRegenerateToken,
+}: {
+  hints: ConnectionHint[]
+  loading: boolean
+  copiedUrl: string | null
+  companionMode: 'off' | 'lan' | 'tailnet'
+  mobileDeviceToken: string
+  busy: boolean
+  tokenBusy: boolean
+  restartRequired: boolean
+  onCopy: (hint: ConnectionHint) => void
+  onCopyText: (value: string) => void
+  onEnable: () => void
+  onDisable: () => void
+  onRegenerateToken: () => void
+}) {
+  const enabled = companionMode !== 'off'
+
+  return (
+    <section className="rounded-lg border bg-muted/30 p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Smartphone className="size-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium">移动端连接</h3>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant={enabled ? 'outline' : 'default'}
+          disabled={busy}
+          onClick={enabled ? onDisable : onEnable}
+        >
+          <Power className="size-3.5" />
+          {enabled ? '关闭' : '开启'}
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex h-16 items-center justify-center">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {restartRequired && (
+            <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 size-4 flex-none" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold">请重启桌面端 App</p>
+                <p className="mt-1 text-[11px] leading-4">
+                  开启或关闭移动端连接后，监听地址需要重启后才会生效。
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-md border bg-background px-2 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <KeyRound className="size-4 flex-none text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium">{enabled ? '已开启' : '未开启'}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {enabled ? '重启桌面端后生效' : '开启后生成设备 token'}
+                  </p>
+                </div>
+              </div>
+              {mobileDeviceToken && (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="复制设备 token"
+                  title="复制 token"
+                  onClick={() => onCopyText(mobileDeviceToken)}
+                >
+                  {copiedUrl === mobileDeviceToken ? (
+                    <Check className="size-4" />
+                  ) : (
+                    <Clipboard className="size-4" />
+                  )}
+                </Button>
+              )}
+            </div>
+            {mobileDeviceToken && (
+              <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
+                {mobileDeviceToken}
+              </p>
+            )}
+          </div>
+
+          {enabled && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={tokenBusy}
+              onClick={onRegenerateToken}
+            >
+              {tokenBusy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+              重新生成 token
+            </Button>
+          )}
+
+          {hints.map((hint) => (
+            <div
+              key={hint.url}
+              className="flex items-center gap-2 rounded-md border bg-background px-2 py-2"
+            >
+              {hintIcon(hint.kind)}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium">{hint.label}</span>
+                  {hint.interfaceName && (
+                    <span className="text-[10px] text-muted-foreground">{hint.interfaceName}</span>
+                  )}
+                </div>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">{hint.url}</p>
+              </div>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`复制 ${hint.label} 地址`}
+                title="复制"
+                onClick={() => onCopy(hint)}
+              >
+                {copiedUrl === hint.url ? <Check className="size-4" /> : <Clipboard className="size-4" />}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function hintIcon(kind: ConnectionHint['kind']) {
+  switch (kind) {
+    case 'tailscale':
+    case 'lan':
+      return <Network className="size-4 flex-none text-muted-foreground" />
+    case 'local':
+      return <Monitor className="size-4 flex-none text-muted-foreground" />
+  }
 }
 
 function KeyField({
@@ -227,5 +544,7 @@ function rowToForm(row: AppSettingsRow): SettingsForm {
     openaiApiKey: row.openaiApiKey ?? '',
     deepseekApiKey: row.deepseekApiKey ?? '',
     arkApiKey: row.arkApiKey ?? '',
+    companionMode: row.companionMode,
+    mobileDeviceToken: row.mobileDeviceToken ?? '',
   }
 }

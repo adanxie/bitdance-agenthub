@@ -96,6 +96,13 @@ app_settings.companion_mode ∈ 'off' | 'lan' | 'tailnet'
 
 打开 companion mode 前必须完成配对能力和鉴权能力。禁止出现「监听 0.0.0.0 且无鉴权」。
 
+P0 实现允许先使用「桌面端地址 + 设备 token」完成配对：
+
+- `app_settings.mobile_device_token` 保存当前桌面端的移动端 token；
+- 桌面设置页展示可连接地址与 token；
+- 打包版 Electron 在 `companion_mode !== 'off'` 且 token 存在时监听 `0.0.0.0:60646`；
+- 手机 App 手动填写地址与 token；扫码配对后续复用同一 payload。
+
 ### 4.2 Tailscale / Tailnet
 
 Tailscale 不作为 AgentHub 的 npm 依赖，也不嵌入代码。它是用户在手机和电脑上安装的网络层软件：

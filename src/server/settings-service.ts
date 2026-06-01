@@ -10,6 +10,12 @@ import { eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { AppSettingsRow } from '@/db/schema'
+import {
+  DEFAULT_COMPANION_PORT,
+  newMobileDeviceToken,
+  writeCompanionConfig,
+  type CompanionMode,
+} from '@/server/companion-config'
 
 const SINGLETON_ID = 'singleton'
 
@@ -20,6 +26,8 @@ const EMPTY: AppSettingsRow = {
   openaiApiKey: null,
   deepseekApiKey: null,
   arkApiKey: null,
+  companionMode: 'off',
+  mobileDeviceToken: null,
   updatedAt: 0,
 }
 
@@ -36,6 +44,8 @@ export interface AppSettingsPatch {
   openaiApiKey?: string | null
   deepseekApiKey?: string | null
   arkApiKey?: string | null
+  companionMode?: CompanionMode
+  mobileDeviceToken?: string | null
 }
 
 /** UPSERT 全部字段：传 null 清空，undefined 不动。 */
@@ -50,6 +60,10 @@ export async function updateAppSettings(patch: AppSettingsPatch): Promise<AppSet
     updatedAt: Date.now(),
   } as AppSettingsRow
 
+  if (next.companionMode !== 'off' && !next.mobileDeviceToken) {
+    next.mobileDeviceToken = newMobileDeviceToken()
+  }
+
   // upsert：先 delete + insert（SQLite ON CONFLICT 需要 unique constraint；PK 自带）
   await db
     .insert(schema.appSettings)
@@ -62,11 +76,36 @@ export async function updateAppSettings(patch: AppSettingsPatch): Promise<AppSet
         openaiApiKey: next.openaiApiKey,
         deepseekApiKey: next.deepseekApiKey,
         arkApiKey: next.arkApiKey,
+        companionMode: next.companionMode,
+        mobileDeviceToken: next.mobileDeviceToken,
         updatedAt: next.updatedAt,
       },
     })
 
+  syncCompanionRuntime(next)
   return next
+}
+
+export async function regenerateMobileDeviceToken(): Promise<AppSettingsRow> {
+  const settings = await updateAppSettings({
+    mobileDeviceToken: newMobileDeviceToken(),
+    companionMode: (await getAppSettings()).companionMode,
+  })
+  return settings
+}
+
+export function syncCompanionRuntime(settings: AppSettingsRow): void {
+  writeCompanionConfig({
+    companionMode: settings.companionMode,
+    mobileDeviceToken: settings.mobileDeviceToken,
+    companionPort: DEFAULT_COMPANION_PORT,
+  })
+
+  if (settings.companionMode !== 'off' && settings.mobileDeviceToken) {
+    process.env.AGENTHUB_MOBILE_TOKEN = settings.mobileDeviceToken
+  } else {
+    delete process.env.AGENTHUB_MOBILE_TOKEN
+  }
 }
 
 /** 空串归一为 null，避免 "" 与 null 混杂。trim 用户输入。 */

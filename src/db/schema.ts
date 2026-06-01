@@ -236,6 +236,8 @@ export const appSettings = sqliteTable('app_settings', {
   openaiApiKey: text('openai_api_key'),
   deepseekApiKey: text('deepseek_api_key'),
   arkApiKey: text('ark_api_key'),
+  companionMode: text('companion_mode', { enum: ['off', 'lan', 'tailnet'] }).notNull().default('off'),
+  mobileDeviceToken: text('mobile_device_token'),
   updatedAt: integer('updated_at').notNull(),
 })
 

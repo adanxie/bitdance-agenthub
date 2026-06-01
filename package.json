@@ -91,6 +91,9 @@
     "files": [
       "dist-electron/**",
       ".next/standalone/**",
+      "!.next/standalone/release/**",
+      "!.next/standalone/.agenthub-data/**",
+      "!.next/standalone/apps/**",
       "package.json"
     ],
     "npmRebuild": false,
@@ -100,8 +103,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],

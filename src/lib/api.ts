@@ -3,7 +3,6 @@ import type {
   AppSettingsRow,
   ArtifactRow,
   AttachmentRow,
-  ConversationRow,
   ConversationWithMeta,
   MessageRow,
 } from '@/db/schema'
@@ -518,6 +517,20 @@ export async function fetchUsageSummary(): Promise<UsageSummary> {
   return json<UsageSummary>(fetch('/api/usage/summary'))
 }
 
+// ─── Mobile companion connection hints ─────────────
+export interface ConnectionHint {
+  kind: 'tailscale' | 'lan' | 'local'
+  label: string
+  host: string
+  url: string
+  interfaceName?: string
+}
+
+export async function fetchConnectionHints(): Promise<ConnectionHint[]> {
+  const { hints } = await json<{ hints: ConnectionHint[] }>(fetch('/api/connection-hints'))
+  return hints
+}
+
 // ─── App Settings (全局 API key) ───────────────
 export async function fetchAppSettings(): Promise<AppSettingsRow> {
   const { settings } = await json<{ settings: AppSettingsRow }>(fetch('/api/settings'))
@@ -530,6 +543,8 @@ export interface AppSettingsPatchBody {
   openaiApiKey?: string | null
   deepseekApiKey?: string | null
   arkApiKey?: string | null
+  companionMode?: 'off' | 'lan' | 'tailnet'
+  mobileDeviceToken?: string | null
 }
 
 export async function updateAppSettings(patch: AppSettingsPatchBody): Promise<AppSettingsRow> {
@@ -539,6 +554,13 @@ export async function updateAppSettings(patch: AppSettingsPatchBody): Promise<Ap
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     }),
+  )
+  return settings
+}
+
+export async function regenerateMobileDeviceToken(): Promise<AppSettingsRow> {
+  const { settings } = await json<{ settings: AppSettingsRow }>(
+    fetch('/api/settings/mobile-token', { method: 'POST' }),
   )
   return settings
 }
