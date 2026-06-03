@@ -1,22 +1,50 @@
 'use client'
 
-import { Paperclip, Send, Shield, Sparkles, Square, X, Zap } from 'lucide-react'
+import {
+  Archive,
+  AlertTriangle,
+  Bot,
+  CircleHelp,
+  Download,
+  Paperclip,
+  Send,
+  Settings,
+  Shield,
+  Sparkles,
+  Square,
+  Trash2,
+  X,
+  Zap,
+} from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { AttachmentChip, PendingAttachmentChip } from '@/components/attachment-chip'
 import { QuotedMessage } from '@/components/quoted-message'
+import { SlashCommandHelpDialog } from '@/components/slash-command-help-dialog'
+import { SlashCommandMenu, type SlashCommandItem } from '@/components/slash-command-menu'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import type { AgentRow } from '@/db/schema'
+import type { AgentRow, ConversationWithMeta, MessageRow } from '@/db/schema'
 import {
   abortRun,
+  clearConversationHistory as clearConversationHistoryAPI,
   compactConversation as compactConversationAPI,
+  fetchMessages,
   sendMessage as sendMessageAPI,
   setFsWriteApprovalMode,
   uploadAttachment as uploadAttachmentAPI,
 } from '@/lib/api'
+import { emitUiCommand } from '@/lib/ui-command-events'
 import { cn } from '@/lib/utils'
 import { useAppStore, usePendingAttachments, useTopLevelRunningRuns } from '@/stores/app-store'
 
@@ -25,11 +53,172 @@ interface MentionTrigger {
   query: string // @ 之后到光标之间的字符
 }
 
+interface SlashTrigger {
+  start: number
+  query: string
+}
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    id: 'compact',
+    command: '/compact',
+    label: '压缩上下文',
+    description: '将早期对话压缩成后续模型读取的摘要',
+    icon: Archive,
+  },
+  {
+    id: 'help',
+    command: '/help',
+    label: '命令帮助',
+    description: '查看可用命令',
+    icon: CircleHelp,
+  },
+  {
+    id: 'export',
+    command: '/export',
+    label: '导出会话',
+    description: '下载当前会话的 Markdown 记录',
+    icon: Download,
+  },
+  {
+    id: 'clear',
+    command: '/clear',
+    label: '清空历史',
+    description: '删除当前会话历史消息',
+    icon: Trash2,
+  },
+  {
+    id: 'settings',
+    command: '/settings',
+    label: '设置',
+    description: '打开设置',
+    icon: Settings,
+  },
+  {
+    id: 'agents',
+    command: '/agents',
+    label: 'Agents',
+    description: '打开 Agent 管理',
+    icon: Bot,
+  },
+]
+
+function buildConversationExportMarkdown({
+  agents,
+  conversation,
+  conversationId,
+  messages,
+}: {
+  agents: Record<string, AgentRow>
+  conversation: ConversationWithMeta | undefined
+  conversationId: string
+  messages: MessageRow[]
+}): string {
+  const title = conversation?.title ?? conversationId
+  const lines = [
+    `# ${title}`,
+    '',
+    `- Conversation ID: ${conversationId}`,
+    `- Exported At: ${new Date().toISOString()}`,
+    `- Messages: ${messages.length}`,
+    '',
+  ]
+
+  messages.forEach((message, index) => {
+    lines.push(`## ${index + 1}. ${messageAuthor(message, agents)}`)
+    lines.push('')
+    lines.push(`_Status: ${message.status} | Created: ${new Date(message.createdAt).toISOString()}_`)
+    lines.push('')
+    for (const part of message.parts) {
+      lines.push(renderMessagePartForExport(part))
+      lines.push('')
+    }
+  })
+
+  return lines.join('\n').trimEnd() + '\n'
+}
+
+function messageAuthor(message: MessageRow, agents: Record<string, AgentRow>): string {
+  if (message.role === 'user') return 'User'
+  if (message.role === 'system') return 'System'
+  return message.agentId ? (agents[message.agentId]?.name ?? `Agent ${message.agentId}`) : 'Agent'
+}
+
+function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
+  switch (part.type) {
+    case 'text':
+      return part.content
+    case 'thinking':
+      return `> Thinking\n>\n${blockquote(part.content)}`
+    case 'code':
+      return ['```' + (part.language ?? ''), part.content, '```'].join('\n')
+    case 'tool_use':
+      return [
+        `Tool Use: ${part.toolName}`,
+        '```json',
+        stringifyForExport(part.args),
+        '```',
+      ].join('\n')
+    case 'tool_result':
+      return [
+        `Tool Result${part.isError ? ' (error)' : ''}: ${part.callId}`,
+        '```json',
+        stringifyForExport(part.result),
+        '```',
+      ].join('\n')
+    case 'artifact_ref':
+      return `[Artifact: ${part.artifactId}]`
+    case 'image_attachment':
+    case 'file_attachment':
+      return `[Attachment: ${part.fileName} (${part.attachmentId}, ${part.mimeType}, ${part.size} bytes)]`
+  }
+}
+
+function blockquote(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
+}
+
+function stringifyForExport(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function downloadMarkdownFile(title: string, content: string): void {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const fileName = `${safeFileName(title)}-${timestamp}.md`
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function safeFileName(value: string): string {
+  const cleaned = value.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim()
+  return (cleaned || 'conversation').slice(0, 80)
+}
+
 export function MessageInput({ conversationId }: { conversationId: string }) {
   const [content, setContent] = useState('')
   const [mentionedIds, setMentionedIds] = useState<string[]>([])
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null)
   const [highlight, setHighlight] = useState(0)
+  const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
+  const [slashHighlight, setSlashHighlight] = useState(0)
+  const [slashHelpOpen, setSlashHelpOpen] = useState(false)
+  const [clearHistoryOpen, setClearHistoryOpen] = useState(false)
+  const [clearingHistory, setClearingHistory] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [sending, setSending] = useState(false)
   const [aborting, setAborting] = useState(false)
   const [uploading, setUploading] = useState<Array<{ tempId: string; name: string }>>([])
@@ -40,6 +229,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const addLocalUserMessage = useAppStore((s) => s.addLocalUserMessage)
   const upsertMessage = useAppStore((s) => s.upsertMessage)
   const replaceLocalMessageId = useAppStore((s) => s.replaceLocalMessageId)
+  const clearConversationHistory = useAppStore((s) => s.clearConversationHistory)
   const conversation = useAppStore((s) => s.conversations[conversationId])
   const upsertConversation = useAppStore((s) => s.upsertConversation)
   const agents = useAppStore((s) => s.agents)
@@ -82,23 +272,102 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     return candidates.filter((a) => a.name.toLowerCase().includes(q))
   }, [trigger, candidates])
 
+  const slashCommands = useMemo<SlashCommandItem[]>(
+    () =>
+      SLASH_COMMANDS.map((command) => {
+        if (command.id === 'compact') {
+          return {
+            ...command,
+            description:
+              pending.length > 0 || uploading.length > 0
+                ? '请先移除附件'
+                : command.description,
+            disabled: sending || isRunning || pending.length > 0 || uploading.length > 0,
+          }
+        }
+        if (command.id === 'export') {
+          return {
+            ...command,
+            description: exporting ? '正在导出当前会话' : command.description,
+            disabled: exporting,
+          }
+        }
+        if (command.id === 'clear') {
+          return {
+            ...command,
+            description: isRunning
+              ? '请先中止正在运行的 Agent'
+              : clearingHistory
+                ? '正在清空会话历史'
+                : command.description,
+            disabled: isRunning || clearingHistory,
+          }
+        }
+        return command
+      }),
+    [clearingHistory, exporting, isRunning, pending.length, sending, uploading.length],
+  )
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashTrigger) return []
+    const q = slashTrigger.query.toLowerCase()
+    if (!q) return slashCommands
+    return slashCommands.filter((command) =>
+      [
+        command.id,
+        command.command,
+        command.command.slice(1),
+        command.label,
+        command.description,
+      ].some((value) => value.toLowerCase().includes(q)),
+    )
+  }, [slashTrigger, slashCommands])
+
   // 候选变化时重置高亮项
   useEffect(() => {
     setHighlight(0)
   }, [trigger?.query, filtered.length])
+
+  useEffect(() => {
+    setSlashHighlight(0)
+  }, [slashTrigger?.query, filteredSlashCommands.length])
 
   // 切换会话清空 state（pending 由 store 自己分桶，不需要在这里清）
   useEffect(() => {
     setContent('')
     setMentionedIds([])
     setTrigger(null)
+    setSlashTrigger(null)
     setUploading([])
   }, [conversationId])
 
   const mentionedAgents = mentionedIds.map((id) => agents[id]).filter(Boolean)
 
+  const detectSlashTrigger = (text: string, cursor: number): SlashTrigger | null => {
+    const beforeCursor = text.slice(0, cursor)
+    const slashIndex = beforeCursor.lastIndexOf('/')
+    if (slashIndex < 0) return null
+    if (beforeCursor.slice(0, slashIndex).trim().length > 0) return null
+
+    const query = beforeCursor.slice(slashIndex + 1)
+    if (/\s/.test(query)) return null
+    return { start: slashIndex, query }
+  }
+
+  const updateInputTriggers = (text: string, cursor: number) => {
+    const slash = detectSlashTrigger(text, cursor)
+    if (slash) {
+      setSlashTrigger(slash)
+      setTrigger(null)
+      return
+    }
+
+    setSlashTrigger(null)
+    updateMentionTrigger(text, cursor)
+  }
+
   // —— 触发检测：从光标往前找 @，遇 whitespace 则放弃；@ 前必须是 word boundary
-  const updateTrigger = (text: string, cursor: number) => {
+  const updateMentionTrigger = (text: string, cursor: number) => {
     if (!isGroup) return setTrigger(null)
     let i = cursor - 1
     while (i >= 0) {
@@ -124,13 +393,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value
     setContent(value)
-    updateTrigger(value, e.target.selectionStart)
+    updateInputTriggers(value, e.target.selectionStart)
   }
 
   // 光标移动（鼠标点击 / 方向键）也要重新判断
   const handleSelect = () => {
     const cursor = textareaRef.current?.selectionStart ?? 0
-    updateTrigger(content, cursor)
+    updateInputTriggers(content, cursor)
   }
 
   const fillMention = (agent: AgentRow) => {
@@ -142,6 +411,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setContent(newContent)
     setMentionedIds((prev) => (prev.includes(agent.id) ? prev : [...prev, agent.id]))
     setTrigger(null)
+    setSlashTrigger(null)
 
     // 把光标移到插入的尾部
     requestAnimationFrame(() => {
@@ -180,7 +450,127 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     )
   }
 
+  const clearSlashCommandInput = () => {
+    setContent('')
+    setMentionedIds([])
+    setTrigger(null)
+    setSlashTrigger(null)
+  }
+
+  const clearComposerDraft = () => {
+    clearSlashCommandInput()
+    clearPendingAttachments(conversationId)
+    if (pendingQuote) setPendingQuote(null)
+    if (replyTargetId) setReplyTarget(conversationId, null)
+  }
+
+  const executeExportCommand = async () => {
+    if (exporting) return
+    clearSlashCommandInput()
+    setExporting(true)
+    try {
+      const messages = await fetchMessages(conversationId)
+      const markdown = buildConversationExportMarkdown({
+        agents,
+        conversation,
+        conversationId,
+        messages,
+      })
+      downloadMarkdownFile(conversation?.title ?? conversationId, markdown)
+    } catch (err) {
+      console.error('[MessageInput] export failed', err)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const confirmClearHistory = async () => {
+    if (clearingHistory || isRunning) return
+    setClearingHistory(true)
+    try {
+      const result = await clearConversationHistoryAPI(conversationId)
+      clearConversationHistory(conversationId, result.conversation)
+      clearComposerDraft()
+      setClearHistoryOpen(false)
+    } catch (err) {
+      console.error('[MessageInput] clear history failed', err)
+    } finally {
+      setClearingHistory(false)
+    }
+  }
+
+  const executeCompactCommand = async () => {
+    if (sending || isRunning || pending.length > 0 || uploading.length > 0) return
+    clearSlashCommandInput()
+    if (pendingQuote) setPendingQuote(null)
+    if (replyTargetId) setReplyTarget(conversationId, null)
+    setSending(true)
+    try {
+      const result = await compactConversationAPI(conversationId)
+      upsertMessage(result.message)
+    } catch (err) {
+      console.error('[MessageInput] compact failed', err)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const executeSlashCommand = async (command: SlashCommandItem) => {
+    if (command.disabled) return
+    switch (command.id) {
+      case 'compact':
+        await executeCompactCommand()
+        break
+      case 'help':
+        clearSlashCommandInput()
+        setSlashHelpOpen(true)
+        break
+      case 'export':
+        await executeExportCommand()
+        break
+      case 'clear':
+        clearSlashCommandInput()
+        setClearHistoryOpen(true)
+        break
+      case 'settings':
+        clearSlashCommandInput()
+        emitUiCommand('open-settings')
+        break
+      case 'agents':
+        clearSlashCommandInput()
+        emitUiCommand('open-agents')
+        break
+      default:
+        break
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashTrigger && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashHighlight((i) => (i + 1) % filteredSlashCommands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashHighlight(
+          (i) => (i - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+        )
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const command = filteredSlashCommands[slashHighlight]
+        if (command) void executeSlashCommand(command)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashTrigger(null)
+        return
+      }
+    }
     // 在 popup 打开时，方向键/Enter/Esc 走 popup
     if (trigger && filtered.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -217,21 +607,9 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     const hasAttachments = pending.length > 0
     if ((!text && !hasAttachments) || sending || isRunning) return
 
-    if (text === '/compact' && !hasAttachments) {
-      setContent('')
-      setMentionedIds([])
-      setTrigger(null)
-      if (pendingQuote) setPendingQuote(null)
-      if (replyTargetId) setReplyTarget(conversationId, null)
-      setSending(true)
-      try {
-        const result = await compactConversationAPI(conversationId)
-        upsertMessage(result.message)
-      } catch (err) {
-        console.error('[MessageInput] compact failed', err)
-      } finally {
-        setSending(false)
-      }
+    const exactSlashCommand = slashCommands.find((command) => command.command === text)
+    if (exactSlashCommand) {
+      await executeSlashCommand(exactSlashCommand)
       return
     }
 
@@ -253,6 +631,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setContent('')
     setMentionedIds([])
     setTrigger(null)
+    setSlashTrigger(null)
     if (pendingQuote) setPendingQuote(null)
     const attachmentIds = pending.map((a) => a.id)
     clearPendingAttachments(conversationId)
@@ -382,6 +761,57 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
           ))}
         </div>
       )}
+
+      <Dialog
+        open={clearHistoryOpen}
+        onOpenChange={(open) => {
+          if (!clearingHistory) setClearHistoryOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-destructive" />
+              清空会话历史？
+            </DialogTitle>
+            <DialogDescription>
+              将删除当前会话的所有历史消息、运行记录和上下文压缩摘要，无法撤销。产物、附件和
+              workspace 文件不会被删除。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={clearingHistory}
+              onClick={() => setClearHistoryOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={clearingHistory || isRunning}
+              onClick={() => void confirmClearHistory()}
+            >
+              {clearingHistory ? '清空中...' : '清空历史'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SlashCommandHelpDialog
+        open={slashHelpOpen}
+        commands={SLASH_COMMANDS}
+        onOpenChange={setSlashHelpOpen}
+      />
+
+      <SlashCommandMenu
+        commands={slashTrigger ? filteredSlashCommands : []}
+        highlightedIndex={slashHighlight}
+        onHighlight={setSlashHighlight}
+        onSelect={(command) => void executeSlashCommand(command)}
+      />
 
       {/* @ Mention popup */}
       {trigger && filtered.length > 0 && (

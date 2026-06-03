@@ -28,6 +28,7 @@ import {
   renameConversation as renameConversationAPI,
   togglePinConversation as togglePinConversationAPI,
 } from '@/lib/api'
+import { subscribeUiCommand } from '@/lib/ui-command-events'
 import { cn } from '@/lib/utils'
 import type { AgentRow, ConversationRow } from '@/db/schema'
 import { useAppStore, useConversationList, useUnreadCount } from '@/stores/app-store'
@@ -73,6 +74,17 @@ export function Sidebar() {
     fetchConversations().then(setConversations).catch(console.error)
     fetchAgents().then(setAgents).catch(console.error)
   }, [setConversations, setAgents])
+
+  useEffect(() => {
+    return subscribeUiCommand((command) => {
+      if (command !== 'open-agents') return
+      setCollapsed(false)
+      setMode('agents')
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        setMobileSidebarOpen(true)
+      }
+    })
+  }, [setMobileSidebarOpen])
 
   const deleteTarget = deleteTargetId ? conversations.find((c) => c.id === deleteTargetId) : null
 

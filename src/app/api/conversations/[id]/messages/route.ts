@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { listMessages, sendMessage } from '@/server/conversation-service'
+import { clearConversationHistory, listMessages, sendMessage } from '@/server/conversation-service'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -45,5 +45,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: message }, { status: 400 })
+  }
+}
+
+export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+  const { id } = await ctx.params
+  try {
+    const result = await clearConversationHistory(id)
+    return NextResponse.json(result)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const status = message.startsWith('Conversation not found')
+      ? 404
+      : message.includes('agent runs are active')
+        ? 409
+        : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }

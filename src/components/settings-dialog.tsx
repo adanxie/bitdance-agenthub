@@ -36,6 +36,7 @@ import {
   type AppSettingsPatchBody,
   type ConnectionHint,
 } from '@/lib/api'
+import { subscribeUiCommand } from '@/lib/ui-command-events'
 
 interface SettingsForm {
   anthropicApiKey: string
@@ -521,6 +522,13 @@ function KeyField({
 /** 设置 button 入口，挂在 Sidebar header。 */
 export function SettingsButton() {
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    return subscribeUiCommand((command) => {
+      if (command === 'open-settings') setOpen(true)
+    })
+  }, [])
+
   return (
     <>
       <Button

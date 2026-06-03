@@ -263,6 +263,76 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   clearClaudeCodeSession(conversationId)
 }
 
+// ─── 清空会话历史 ────────────────────────────────────────
+export interface ClearConversationHistoryResult {
+  conversation: ConversationWithMeta
+  deletedMessageCount: number
+  deletedRunCount: number
+  deletedSummaryCount: number
+}
+
+export async function clearConversationHistory(
+  conversationId: string,
+): Promise<ClearConversationHistoryResult> {
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, conversationId),
+  })
+  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+  const activeRuns = await db.query.agentRuns.findMany({
+    where: and(
+      eq(schema.agentRuns.conversationId, conversationId),
+      inArray(schema.agentRuns.status, ['queued', 'running']),
+    ),
+  })
+  if (activeRuns.length > 0) {
+    throw new Error('Cannot clear conversation history while agent runs are active')
+  }
+
+  const messagesToDelete = await db.query.messages.findMany({
+    where: eq(schema.messages.conversationId, conversationId),
+  })
+  const runsToDelete = await db.query.agentRuns.findMany({
+    where: eq(schema.agentRuns.conversationId, conversationId),
+  })
+  const summariesToDelete = await db.query.contextSummaries.findMany({
+    where: eq(schema.contextSummaries.conversationId, conversationId),
+  })
+
+  const now = Date.now()
+  db.transaction((tx) => {
+    tx.delete(schema.contextSummaries)
+      .where(eq(schema.contextSummaries.conversationId, conversationId))
+      .run()
+    tx.delete(schema.messages).where(eq(schema.messages.conversationId, conversationId)).run()
+    tx.delete(schema.agentRuns)
+      .where(eq(schema.agentRuns.conversationId, conversationId))
+      .run()
+    tx.update(schema.conversations)
+      .set({
+        pinnedMessageIds: [],
+        bookmarkedMessageIds: [],
+        updatedAt: now,
+      })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+  })
+
+  clearClaudeCodeSession(conversationId)
+
+  return {
+    conversation: await withWorkspaceMeta({
+      ...conv,
+      pinnedMessageIds: [],
+      bookmarkedMessageIds: [],
+      updatedAt: now,
+    }),
+    deletedMessageCount: messagesToDelete.length,
+    deletedRunCount: runsToDelete.length,
+    deletedSummaryCount: summariesToDelete.length,
+  }
+}
+
 // ─── 重命名会话 ──────────────────────────────────────────
 export async function renameConversation(
   conversationId: string,

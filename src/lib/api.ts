@@ -236,6 +236,21 @@ export async function fetchMessages(conversationId: string): Promise<MessageRow[
   return messages
 }
 
+export interface ClearConversationHistoryResult {
+  conversation: ConversationWithMeta
+  deletedMessageCount: number
+  deletedRunCount: number
+  deletedSummaryCount: number
+}
+
+export async function clearConversationHistory(
+  conversationId: string,
+): Promise<ClearConversationHistoryResult> {
+  return json<ClearConversationHistoryResult>(
+    fetch(`/api/conversations/${conversationId}/messages`, { method: 'DELETE' }),
+  )
+}
+
 export interface SendMessageBody {
   content: string
   mentionedAgentIds?: string[]

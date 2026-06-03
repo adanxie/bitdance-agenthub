@@ -122,6 +122,7 @@ interface AppState {
 
   /** 批量删除消息（撤回 / 编辑场景）。同时清理 messageIdsByConv 对应桶 + replyTarget。 */
   removeMessages(conversationId: string, messageIds: string[]): void
+  clearConversationHistory(conversationId: string, conversation: ConversationWithMeta): void
 
   addPendingAttachment(conversationId: string, attachment: AttachmentRow): void
   removePendingAttachment(conversationId: string, attachmentId: string): void
@@ -334,6 +335,31 @@ export const useAppStore = create<AppState>()(
         if (replyId && toRemove.has(replyId)) {
           delete s.replyTargetByConv[conversationId]
         }
+      }),
+
+    clearConversationHistory: (conversationId, conversation) =>
+      set((s) => {
+        const messageIds = new Set(s.messageIdsByConv[conversationId] ?? [])
+        for (const id of messageIds) delete s.messages[id]
+        s.messageIdsByConv[conversationId] = []
+
+        const runIds = new Set(Object.keys(s.runsByConv[conversationId] ?? {}))
+        for (const runId of runIds) delete s.dispatchesByRunId[runId]
+        for (const runId in s.dispatchesByRunId) {
+          if (messageIds.has(s.dispatchesByRunId[runId].messageId)) {
+            delete s.dispatchesByRunId[runId]
+          }
+        }
+
+        delete s.runsByConv[conversationId]
+        delete s.replyTargetByConv[conversationId]
+        delete s.pendingWritesByConv[conversationId]
+        delete s.pendingQuestionsByConv[conversationId]
+        delete s.unreadByConv[conversationId]
+        if (s.highlightedMessageId && messageIds.has(s.highlightedMessageId)) {
+          s.highlightedMessageId = null
+        }
+        s.conversations[conversationId] = conversation
       }),
 
     setReplyTarget: (conversationId, messageId) =>
