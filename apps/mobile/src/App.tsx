@@ -3,6 +3,7 @@ import { Home, Menu, Settings, X } from 'lucide-react'
 
 import { createMobileApiClient } from './api/client'
 import { ApprovalsScreen } from './screens/ApprovalsScreen'
+import { ArtifactPreviewSheet } from './screens/ArtifactPreviewSheet'
 import { ConversationsScreen } from './screens/ConversationsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { StatusScreen } from './screens/StatusScreen'
@@ -10,6 +11,7 @@ import { loadConnection, loadRecentHosts, rememberRecentHost, saveConnection } f
 import type {
   ConnectionConfig,
   MobileAskUserAnswers,
+  MobileArtifact,
   MobileConversationDetail,
   MobileSnapshot,
 } from './types'
@@ -27,6 +29,10 @@ export function App() {
   const [lastSuccessfulConnection, setLastSuccessfulConnection] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null)
   const [conversationDetail, setConversationDetail] = useState<MobileConversationDetail | null>(null)
+  const [artifactPreview, setArtifactPreview] = useState<MobileArtifact | null>(null)
+  const [artifactCache, setArtifactCache] = useState<Record<string, MobileArtifact>>({})
+  const [artifactLoadingId, setArtifactLoadingId] = useState<string | null>(null)
+  const [artifactError, setArtifactError] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [operationId, setOperationId] = useState<string | null>(null)
@@ -161,6 +167,7 @@ export function App() {
     setActiveView('home')
     setSelectedConversationId(null)
     setConversationDetail(null)
+    closeArtifactPreview()
     setDrawerOpen(false)
   }
 
@@ -168,6 +175,7 @@ export function App() {
     setActiveView('settings')
     setSelectedConversationId(null)
     setConversationDetail(null)
+    closeArtifactPreview()
     setDrawerOpen(false)
   }
 
@@ -177,6 +185,38 @@ export function App() {
       await api.sendMessage(selectedConversationId, content)
       setConversationDetail(await api.getConversation(selectedConversationId))
     })
+  }
+
+  async function openArtifactPreview(artifactId: string) {
+    if (!configured) {
+      setError('请先在设置里填写桌面端地址和设备 token。')
+      return
+    }
+    const cached = artifactCache[artifactId]
+    if (cached) {
+      setArtifactPreview(cached)
+      setArtifactError(null)
+      return
+    }
+
+    setArtifactLoadingId(artifactId)
+    setArtifactError(null)
+    setArtifactPreview(null)
+    try {
+      const artifact = await api.getArtifact(artifactId)
+      setArtifactCache((current) => ({ ...current, [artifact.id]: artifact }))
+      setArtifactPreview(artifact)
+    } catch (err) {
+      setArtifactError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setArtifactLoadingId(null)
+    }
+  }
+
+  function closeArtifactPreview() {
+    setArtifactPreview(null)
+    setArtifactError(null)
+    setArtifactLoadingId(null)
   }
 
   const hasPending = !!snapshot && (snapshot.pendingWrites.length > 0 || snapshot.pendingQuestions.length > 0)
@@ -189,6 +229,7 @@ export function App() {
         detail={conversationDetail}
         selectedConversationId={selectedConversationId}
         onOpenConversation={(id) => void openConversation(id)}
+        onOpenArtifact={(id) => void openArtifactPreview(id)}
         onSendMessage={(content) => void sendMessageFromMobile(content)}
       />
     ) : activeView === 'settings' ? (
@@ -241,6 +282,13 @@ export function App() {
       </button>
 
       <div className="screen-frame">{content}</div>
+
+      <ArtifactPreviewSheet
+        artifact={artifactPreview}
+        loading={artifactLoadingId !== null}
+        error={artifactError}
+        onClose={closeArtifactPreview}
+      />
 
       {drawerOpen && (
         <>
