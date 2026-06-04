@@ -48,7 +48,7 @@ export const writeArtifactTool: ToolDef = {
       content: {
         type: 'object',
         description:
-          'Artifact body. For web_app: { files: { "index.html": "...", "style.css"?, "script.js"? }, entry: "index.html" }. For document: { format: "markdown", content: "..." }. For image: { url: "...", alt: "..." }',
+          'Artifact body — pass as a JSON OBJECT, do NOT JSON-stringify it into a quoted string. For web_app: { files: { "index.html": "...", "style.css"?, "script.js"? }, entry: "index.html" }. For document: { format: "markdown", content: "...markdown text..." }. For image: { url: "...", alt: "..." }. Common mistake to avoid: sending content as a string like "{\\"format\\":\\"markdown\\",...}" — send the raw object, not its JSON text.',
       },
       parentArtifactId: {
         type: 'string',

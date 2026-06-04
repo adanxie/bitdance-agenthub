@@ -22,7 +22,11 @@ server.registerTool(
     inputSchema: {
       type: z.enum(['web_app', 'document', 'image']),
       title: z.string(),
-      content: z.unknown(),
+      content: z
+        .unknown()
+        .describe(
+          'Artifact body as a JSON OBJECT, NOT a JSON-stringified string. web_app: { files: { "index.html": "..." }, entry: "index.html" }. document: { format: "markdown", content: "..." }. image: { url, alt }.',
+        ),
       parentArtifactId: z.string().optional(),
     },
   },
