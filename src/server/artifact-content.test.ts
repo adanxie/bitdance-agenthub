@@ -80,7 +80,108 @@ describe('buildArtifactContent', () => {
     })
   })
 
+  it('diff: 标准 hunks 对象', () => {
+    expect(
+      buildArtifactContent('diff', {
+        targetArtifactId: 'art_target',
+        hunks: [
+          {
+            oldStart: 1,
+            oldLines: 2,
+            newStart: 1,
+            newLines: 2,
+            lines: [' import x', '-const a = 1', '+const a = 2'],
+          },
+        ],
+      }),
+    ).toEqual({
+      type: 'diff',
+      targetArtifactId: 'art_target',
+      applied: false,
+      hunks: [
+        {
+          oldStart: 1,
+          oldLines: 2,
+          newStart: 1,
+          newLines: 2,
+          lines: [' import x', '-const a = 1', '+const a = 2'],
+        },
+      ],
+    })
+  })
+
+  it('diff: 标准 hunks 中混入 hunk header 时会过滤', () => {
+    expect(
+      buildArtifactContent('diff', {
+        targetArtifactId: 'art_target',
+        hunks: [
+          {
+            oldStart: 10,
+            oldLines: 2,
+            newStart: 11,
+            newLines: 2,
+            lines: ['@@ -10,2 +11,2 @@', ' old', '-line a', '+line b'],
+          },
+        ],
+      }),
+    ).toEqual({
+      type: 'diff',
+      targetArtifactId: 'art_target',
+      applied: false,
+      hunks: [
+        {
+          oldStart: 10,
+          oldLines: 2,
+          newStart: 11,
+          newLines: 2,
+          lines: [' old', '-line a', '+line b'],
+        },
+      ],
+    })
+  })
+
+  it('diff: 从 unified diff 字符串解析 hunks', () => {
+    expect(
+      buildArtifactContent('diff', {
+        targetArtifactId: 'art_target',
+        diff: '@@ -10,2 +10,2 @@\n old\n-line a\n+line b',
+      }),
+    ).toEqual({
+      type: 'diff',
+      targetArtifactId: 'art_target',
+      applied: false,
+      hunks: [
+        {
+          oldStart: 10,
+          oldLines: 2,
+          newStart: 10,
+          newLines: 2,
+          lines: [' old', '-line a', '+line b'],
+        },
+      ],
+    })
+  })
+
+  it('code_file: 标准 workspace metadata 对象', () => {
+    expect(
+      buildArtifactContent('code_file', {
+        workspacePath: 'src/app/page.tsx',
+        language: 'typescript',
+        sizeBytes: 123,
+        checksum: 'abc',
+      }),
+    ).toEqual({
+      type: 'code_file',
+      workspacePath: 'src/app/page.tsx',
+      language: 'typescript',
+      sizeBytes: 123,
+      checksum: 'abc',
+    })
+  })
+
   it('非法输入返回 null', () => {
     expect(buildArtifactContent('document', 123)).toBeNull()
+    expect(buildArtifactContent('diff', { targetArtifactId: 'art_target', hunks: [] })).toBeNull()
+    expect(buildArtifactContent('code_file', { language: 'typescript' })).toBeNull()
   })
 })

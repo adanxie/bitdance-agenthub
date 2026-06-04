@@ -1,4 +1,4 @@
-import type { ArtifactContent, ArtifactType } from '@/shared/types'
+import type { ArtifactContent, ArtifactType, DiffHunk } from '@/shared/types'
 
 /**
  * 把 LLM 或用户给的松散 content 规整成强类型 ArtifactContent;非法返回 null。
@@ -104,6 +104,39 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
     return null
   }
 
+  if (type === 'diff') {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const obj = raw as Record<string, unknown>
+    const targetArtifactId = readString(obj.targetArtifactId) ?? readString(obj.targetId)
+    if (!targetArtifactId) return null
+
+    const hunks = Array.isArray(obj.hunks)
+      ? normaliseHunks(obj.hunks)
+      : parseUnifiedDiff(readString(obj.diff) ?? readString(obj.patch))
+
+    if (hunks.length === 0) return null
+    return {
+      type: 'diff',
+      targetArtifactId,
+      hunks,
+      applied: typeof obj.applied === 'boolean' ? obj.applied : false,
+    }
+  }
+
+  if (type === 'code_file') {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const obj = raw as Record<string, unknown>
+    const workspacePath = readString(obj.workspacePath) ?? readString(obj.path)
+    if (!workspacePath) return null
+    return {
+      type: 'code_file',
+      workspacePath,
+      language: readString(obj.language) ?? guessLanguage(workspacePath),
+      sizeBytes: readNonNegativeNumber(obj.sizeBytes) ?? 0,
+      checksum: readString(obj.checksum) ?? '',
+    }
+  }
+
   return null
 }
 
@@ -119,6 +152,16 @@ const CONTENT_WRAPPER_KEYS = [
   'js',
   'code',
   'url',
+  'targetArtifactId',
+  'targetId',
+  'hunks',
+  'diff',
+  'patch',
+  'workspacePath',
+  'path',
+  'language',
+  'sizeBytes',
+  'checksum',
 ]
 
 /**
@@ -171,7 +214,7 @@ function isWrapperObject(v: unknown): v is Record<string, unknown> {
 
 /** content 串里出现包装字段名 —— 用于决定是否值得做容错解析(避免误伤正常内容)。 */
 function hasWrapperSignature(s: string): boolean {
-  return /"(?:format|content|markdown|text|files|entry|html)"\s*:/.test(s)
+  return /"(?:format|content|markdown|text|files|entry|html|targetArtifactId|targetId|hunks|diff|patch|workspacePath|path)"\s*:/.test(s)
 }
 
 /** 把非法 JSON 转义 `\X`(X ∉ `"\/bfnrtu`)改成合法的 `\\X`,修掉模型常见的 `\|` 等。 */
@@ -202,4 +245,94 @@ function firstBalancedObject(s: string): string | null {
     }
   }
   return null
+}
+
+function normaliseHunks(rawHunks: unknown[]): DiffHunk[] {
+  const out: DiffHunk[] = []
+  for (const raw of rawHunks) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const obj = raw as Record<string, unknown>
+    const lines = Array.isArray(obj.lines)
+      ? obj.lines
+          .filter((line): line is string => typeof line === 'string')
+          .filter((line) => !isUnifiedDiffMetadataLine(line))
+      : []
+    if (lines.length === 0) continue
+    out.push({
+      oldStart: readPositiveNumber(obj.oldStart) ?? 1,
+      oldLines: readNonNegativeNumber(obj.oldLines) ?? countHunkLines(lines, '+'),
+      newStart: readPositiveNumber(obj.newStart) ?? 1,
+      newLines: readNonNegativeNumber(obj.newLines) ?? countHunkLines(lines, '-'),
+      lines,
+    })
+  }
+  return out
+}
+
+function parseUnifiedDiff(rawDiff: string | null): DiffHunk[] {
+  if (!rawDiff) return []
+  const hunks: DiffHunk[] = []
+  let current: DiffHunk | null = null
+
+  for (const line of rawDiff.replace(/\r\n/g, '\n').split('\n')) {
+    const header = line.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/)
+    if (header) {
+      current = {
+        oldStart: Number(header[1]),
+        oldLines: header[2] ? Number(header[2]) : 1,
+        newStart: Number(header[3]),
+        newLines: header[4] ? Number(header[4]) : 1,
+        lines: [],
+      }
+      hunks.push(current)
+      continue
+    }
+    if (!current) continue
+    if (line.startsWith('\\ No newline') || isUnifiedDiffMetadataLine(line)) continue
+    if (line.startsWith('+') || line.startsWith('-') || line.startsWith(' ')) {
+      current.lines.push(line)
+    }
+  }
+
+  return hunks.filter((h) => h.lines.length > 0)
+}
+
+function countHunkLines(lines: string[], excludedPrefix: '+' | '-'): number {
+  return lines.filter((line) => !line.startsWith(excludedPrefix)).length
+}
+
+function isUnifiedDiffMetadataLine(line: string): boolean {
+  return /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(line)
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null
+}
+
+function readNonNegativeNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null
+}
+
+function readPositiveNumber(value: unknown): number | null {
+  const n = readNonNegativeNumber(value)
+  return n && n > 0 ? n : null
+}
+
+function guessLanguage(workspacePath: string): string {
+  const ext = workspacePath.split('.').pop()?.toLowerCase() ?? ''
+  const aliases: Record<string, string> = {
+    js: 'javascript',
+    jsx: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    md: 'markdown',
+    markdown: 'markdown',
+    html: 'html',
+    css: 'css',
+    json: 'json',
+    yml: 'yaml',
+    yaml: 'yaml',
+  }
+  return aliases[ext] ?? (ext || 'text')
 }

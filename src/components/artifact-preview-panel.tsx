@@ -1,17 +1,22 @@
 'use client'
 
-import { ChevronRight, Clock, Code, Copy, Download, ExternalLink, Eye, FileText, History, Image as ImageIcon, Layers, Pencil, RotateCcw, Save, X } from 'lucide-react'
+import { AlertCircle, ChevronRight, Clock, Code, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Pencil, RefreshCw, RotateCcw, Save, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
+import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 
+import { CodeBlock } from '@/components/code-block'
+import { buildDiffStyles } from '@/components/diff-viewer-styles'
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactRow } from '@/db/schema'
-import { createArtifactVersion, fetchArtifactVersions } from '@/lib/api'
+import { createArtifactVersion, fetchArtifactVersions, workspaceReadFile, workspaceWriteFile } from '@/lib/api'
 import { artifactPreviewPath } from '@/lib/artifact-preview'
+import { normalizeLang } from '@/lib/highlighter'
 import { cn } from '@/lib/utils'
-import type { ArtifactContent } from '@/shared/types'
+import type { ArtifactContent, DiffHunk } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
 // 编辑器仅在用户点「编辑」时懒加载（重型 client 库；CodeMirror 无 worker、离线 OK）
@@ -224,13 +229,16 @@ function ArtifactView({
     case 'image':
       return <ImageView content={content} />
     case 'code_file':
-      return wrap(<CodeFileView content={content} />)
-    case 'diff':
-      return (
-        <Empty>
-          Diff 视图开发中。当前 artifact 类型: {content.type}
-        </Empty>
+      return wrap(
+        <CodeFileView
+          artifactId={artifact.id}
+          conversationId={artifact.conversationId}
+          content={content}
+          onSaveVersion={onSaveVersion}
+        />,
       )
+    case 'diff':
+      return wrap(<DiffArtifactView content={content} />)
     default:
       return <Empty>该类型暂不支持预览</Empty>
   }
@@ -444,24 +452,193 @@ function ImageView({ content }: { content: Extract<ArtifactContent, { type: 'ima
   )
 }
 
-// ─── code_file（workspace 文件，目前先 readonly 显示）───
+// ─── code_file（workspace 文件引用）──────────────────────
 function CodeFileView({
+  artifactId,
+  conversationId,
   content,
+  onSaveVersion,
 }: {
+  artifactId: string
+  conversationId: string
   content: Extract<ArtifactContent, { type: 'code_file' }>
+  onSaveVersion: SaveVersionFn
 }) {
+  const [view, setView] = useState<'source' | 'edit'>('source')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [fileContent, setFileContent] = useState('')
+  const [draft, setDraft] = useState('')
+  const [size, setSize] = useState(content.sizeBytes)
+  const [truncated, setTruncated] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await workspaceReadFile(conversationId, content.workspacePath)
+      setFileContent(result.content)
+      setDraft(result.content)
+      setSize(result.size)
+      setTruncated(result.truncated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+      setSaving(false)
+    }
+  }, [conversationId, content.workspacePath])
+
+  useEffect(() => {
+    setView('source')
+    void reload()
+  }, [artifactId, reload])
+
+  const language = normalizeLang(content.language || guessLanguage(content.workspacePath))
+  const dirty = draft !== fileContent
+
+  const save = async () => {
+    if (!dirty || saving || truncated) return
+    setSaving(true)
+    setError(null)
+    try {
+      await workspaceWriteFile(conversationId, content.workspacePath, draft)
+      const bytes = new TextEncoder().encode(draft)
+      await onSaveVersion({
+        workspacePath: content.workspacePath,
+        language,
+        sizeBytes: bytes.byteLength,
+        checksum: await sha256(bytes),
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        加载 {content.workspacePath}...
+      </div>
+    )
+  }
+
+  if (error && !fileContent) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <AlertCircle className="size-6 text-red-500" />
+        <div className="text-sm font-medium">无法打开 workspace 文件</div>
+        <div className="font-mono text-xs text-muted-foreground">{error}</div>
+        <Button size="sm" variant="outline" onClick={() => void reload()}>
+          <RefreshCw className="mr-1 size-3.5" />
+          重试
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b px-4 py-2 text-xs text-muted-foreground">
-        <span className="font-mono">{content.workspacePath}</span>
-        <span className="ml-2">· {content.language}</span>
-        <span className="ml-2">· {(content.sizeBytes / 1024).toFixed(1)} KB</span>
-      </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="px-4 py-3 text-xs text-muted-foreground">
-          需要从 workspace 加载文件内容才能渲染（P1）
+      <div className="flex shrink-0 items-center justify-between border-b px-2">
+        <div className="flex">
+          <ViewTab active={view === 'source'} onClick={() => setView('source')}>
+            <Eye className="size-3.5" />
+            源码
+          </ViewTab>
+          <ViewTab active={view === 'edit'} onClick={() => setView('edit')}>
+            <Pencil className="size-3.5" />
+            编辑
+          </ViewTab>
         </div>
-      </ScrollArea>
+        <Button size="icon" variant="ghost" onClick={() => void reload()} title="重新加载">
+          <RefreshCw className="size-4" />
+        </Button>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground">
+        <code className="min-w-0 flex-1 truncate font-mono">{content.workspacePath}</code>
+        <span className="font-mono text-[10px]">{language}</span>
+        <span className="font-mono text-[10px]">{(size / 1024).toFixed(1)} KB</span>
+        {truncated && (
+          <span className="font-mono text-[10px] text-amber-600" title="文件已截断，不可保存">
+            已截断
+          </span>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1">
+        {view === 'source' ? (
+          <ScrollArea className="size-full">
+            <div className="px-3 py-3">
+              <CodeBlock code={fileContent} language={language} />
+            </div>
+          </ScrollArea>
+        ) : (
+          <ArtifactCodeEditor
+            value={draft}
+            onChange={setDraft}
+            filename={content.workspacePath}
+            type="code_file"
+            readOnly={truncated}
+          />
+        )}
+      </div>
+
+      {view === 'edit' && (
+        <EditFooter
+          dirty={dirty && !truncated}
+          saving={saving}
+          error={error}
+          onSave={save}
+          onReset={() => {
+            setDraft(fileContent)
+            setError(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── diff ───────────────────────────────────────────────
+function DiffArtifactView({ content }: { content: Extract<ArtifactContent, { type: 'diff' }> }) {
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === 'dark'
+  const diffStyles = useMemo(() => buildDiffStyles(isDark), [isDark])
+  const pair = useMemo(() => diffHunksToTextPair(content.hunks), [content.hunks])
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center gap-2 border-b bg-muted/20 px-4 py-2 text-xs">
+        <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">目标产物</span>
+        <code className="min-w-0 flex-1 truncate font-mono">{content.targetArtifactId}</code>
+        <span
+          className={cn(
+            'rounded border px-1.5 py-0.5 text-[10px]',
+            content.applied
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+              : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+          )}
+        >
+          {content.applied ? '已应用' : '未应用'}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-background pending-diff-body">
+        <ReactDiffViewer
+          oldValue={pair.oldText}
+          newValue={pair.newText}
+          splitView={true}
+          useDarkTheme={isDark}
+          compareMethod={DiffMethod.WORDS_WITH_SPACE}
+          leftTitle="修改前"
+          rightTitle="修改后"
+          styles={diffStyles}
+        />
+      </div>
     </div>
   )
 }
@@ -540,6 +717,8 @@ function Empty({ children }: { children: React.ReactNode }) {
 function TypeIcon({ type }: { type: string }) {
   if (type === 'image') return <ImageIcon className="size-4 text-muted-foreground" />
   if (type === 'document') return <FileText className="size-4 text-muted-foreground" />
+  if (type === 'code_file') return <FileCode className="size-4 text-muted-foreground" />
+  if (type === 'diff') return <GitCompare className="size-4 text-muted-foreground" />
   return <Layers className="size-4 text-muted-foreground" />
 }
 
@@ -550,4 +729,49 @@ function openPreviewInNewTab(artifactId: string): void {
 function copyPreviewUrl(artifactId: string): void {
   const url = new URL(artifactPreviewPath(artifactId), window.location.origin).toString()
   navigator.clipboard?.writeText(url).catch(() => {})
+}
+
+function diffHunksToTextPair(hunks: DiffHunk[]): { oldText: string; newText: string } {
+  const oldLines: string[] = []
+  const newLines: string[] = []
+
+  for (const hunk of hunks) {
+    for (const line of hunk.lines) {
+      if (line.startsWith('\\ No newline') || isUnifiedDiffMetadataLine(line)) continue
+      if (line.startsWith('+')) {
+        newLines.push(line.slice(1))
+      } else if (line.startsWith('-')) {
+        oldLines.push(line.slice(1))
+      } else if (line.startsWith(' ')) {
+        const text = line.slice(1)
+        oldLines.push(text)
+        newLines.push(text)
+      } else {
+        oldLines.push(line)
+        newLines.push(line)
+      }
+    }
+  }
+
+  return { oldText: oldLines.join('\n'), newText: newLines.join('\n') }
+}
+
+function isUnifiedDiffMetadataLine(line: string): boolean {
+  return /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(line)
+}
+
+function guessLanguage(filePath: string): string {
+  return normalizeLang(filePath.split('.').pop()?.toLowerCase() ?? '')
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    return `size:${bytes.byteLength}`
+  }
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
 }
