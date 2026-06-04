@@ -168,6 +168,10 @@ function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
       ].join('\n')
     case 'artifact_ref':
       return `[Artifact: ${part.artifactId}]`
+    case 'deploy_status':
+      return part.deployment.status === 'ready'
+        ? `[Deployment: ${part.deployment.title} v${part.deployment.version} (${part.deployment.previewPath})]`
+        : `[Deployment failed: ${part.deployment.title} (${part.deployment.error ?? 'unknown error'})]`
     case 'image_attachment':
     case 'file_attachment':
       return `[Attachment: ${part.fileName} (${part.attachmentId}, ${part.mimeType}, ${part.size} bytes)]`

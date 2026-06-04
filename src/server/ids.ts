@@ -14,3 +14,4 @@ export const newAttachmentId = () => `att_${nano()}`
 export const newPendingWriteId = () => `pwr_${nano()}`
 export const newPendingQuestionId = () => `pq_${nano()}`
 export const newContextSummaryId = () => `ctx_${nano()}`
+export const newDeploymentId = () => `dep_${nano()}`

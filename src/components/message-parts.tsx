@@ -1,12 +1,14 @@
 'use client'
 
-import { Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Layers, Loader2, Sparkles, XCircle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Image as ImageIcon, Layers, Loader2, Rocket, Sparkles, XCircle } from 'lucide-react'
+import type { MouseEvent, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { AttachmentChip } from '@/components/attachment-chip'
 import { CodeBlock } from '@/components/code-block'
 import { Markdown } from '@/components/markdown'
+import { artifactPreviewPath } from '@/lib/artifact-preview'
 import { fetchArtifact } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { MessagePart } from '@/shared/types'
@@ -84,6 +86,8 @@ function PartRenderer({ part }: { part: MessagePart }) {
       return <CodePart language={part.language} content={part.content} />
     case 'artifact_ref':
       return <ArtifactRefPart artifactId={part.artifactId} />
+    case 'deploy_status':
+      return <DeployStatusPart deployment={part.deployment} />
     case 'image_attachment':
     case 'file_attachment':
       return (
@@ -469,24 +473,50 @@ function ArtifactRefPart({ artifactId }: { artifactId: string }) {
     )
   }
 
+  const isWebApp = artifact.type === 'web_app'
+
   return (
-    <button
-      type="button"
+    <Card
+      role="button"
+      tabIndex={0}
       onClick={() => openPreview(artifact.id)}
-      className="block w-full text-left"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') openPreview(artifact.id)
+      }}
+      className="cursor-pointer transition hover:border-primary/40 hover:shadow-sm"
     >
-      <Card className="cursor-pointer transition hover:border-primary/40 hover:shadow-sm">
-        <CardContent className="flex items-start gap-3 px-3 py-2">
-          <ArtifactIcon type={artifact.type} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{artifact.title}</div>
-            <div className="text-xs text-muted-foreground">
-              {artifact.type} · v{artifact.version} · 点击预览
-            </div>
+      <CardContent className="flex items-start gap-3 px-3 py-2">
+        <ArtifactIcon type={artifact.type} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{artifact.title}</div>
+          <div className="text-xs text-muted-foreground">
+            {artifact.type} · v{artifact.version} · 点击预览
           </div>
-        </CardContent>
-      </Card>
-    </button>
+        </div>
+        {isWebApp && (
+          <div className="flex shrink-0 items-center gap-1">
+            <IconAction
+              title="打开预览 URL"
+              onClick={(event) => {
+                event.stopPropagation()
+                openPreviewUrl(artifact.id)
+              }}
+            >
+              <ExternalLink className="size-3.5" />
+            </IconAction>
+            <IconAction
+              title="复制预览 URL"
+              onClick={(event) => {
+                event.stopPropagation()
+                copyPreviewUrl(artifact.id)
+              }}
+            >
+              <Copy className="size-3.5" />
+            </IconAction>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -494,4 +524,99 @@ function ArtifactIcon({ type }: { type: string }) {
   if (type === 'image') return <ImageIcon className="size-5 shrink-0 text-muted-foreground" />
   if (type === 'document') return <FileText className="size-5 shrink-0 text-muted-foreground" />
   return <Layers className="size-5 shrink-0 text-muted-foreground" />
+}
+
+function DeployStatusPart({
+  deployment,
+}: {
+  deployment: Extract<MessagePart, { type: 'deploy_status' }>['deployment']
+}) {
+  const ready = deployment.status === 'ready'
+  const previewUrl = resolvePreviewUrl(deployment.previewPath)
+
+  return (
+    <Card
+      className={cn(
+        ready
+          ? 'border-sky-200 bg-sky-50/50 dark:border-sky-900/50 dark:bg-sky-950/20'
+          : 'border-red-200 bg-red-50/50 dark:border-red-900/50 dark:bg-red-950/20',
+      )}
+    >
+      <CardContent className="flex items-start gap-3 px-3 py-2">
+        {ready ? (
+          <Rocket className="mt-0.5 size-4 shrink-0 text-sky-600 dark:text-sky-400" />
+        ) : (
+          <XCircle className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">
+            {ready ? '部署预览已就绪' : '部署预览失败'}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {deployment.title} · v{deployment.version}
+          </div>
+          {ready ? (
+            <div className="mt-1 truncate font-mono text-[11px] text-sky-700 dark:text-sky-300">
+              {previewUrl}
+            </div>
+          ) : (
+            <div className="mt-1 text-xs text-red-700 dark:text-red-300">
+              {deployment.error ?? 'Unknown deployment error'}
+            </div>
+          )}
+        </div>
+        {ready && (
+          <div className="flex shrink-0 items-center gap-1">
+            <IconAction title="打开预览 URL" onClick={() => openPath(deployment.previewPath)}>
+              <ExternalLink className="size-3.5" />
+            </IconAction>
+            <IconAction title="复制预览 URL" onClick={() => copyPath(deployment.previewPath)}>
+              <Copy className="size-3.5" />
+            </IconAction>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function IconAction({
+  title,
+  onClick,
+  children,
+}: {
+  title: string
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-background/80 hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+}
+
+function openPreviewUrl(artifactId: string): void {
+  openPath(artifactPreviewPath(artifactId))
+}
+
+function copyPreviewUrl(artifactId: string): void {
+  copyPath(artifactPreviewPath(artifactId))
+}
+
+function openPath(path: string): void {
+  window.open(path, '_blank', 'noopener,noreferrer')
+}
+
+function copyPath(path: string): void {
+  navigator.clipboard?.writeText(resolvePreviewUrl(path)).catch(() => {})
+}
+
+function resolvePreviewUrl(path: string): string {
+  return new URL(path, window.location.origin).toString()
 }

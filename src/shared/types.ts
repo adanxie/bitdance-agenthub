@@ -11,6 +11,7 @@ export type MessagePart =
   | { type: 'tool_use'; callId: string; toolName: string; args: unknown }
   | { type: 'tool_result'; callId: string; result: unknown; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
+  | { type: 'deploy_status'; deployment: DeployStatusRecord }
   | {
       type: 'image_attachment'
       attachmentId: string
@@ -146,6 +147,17 @@ export interface PendingQuestion {
   questions: AskUserQuestionItem[]
   createdAt: number
 }
+
+export interface DeployStatusRecord {
+  id: string
+  artifactId: string
+  title: string
+  version: number
+  previewPath: string
+  status: 'ready' | 'failed'
+  error?: string
+  createdAt: number
+}
 /** 单条问题的答案：选中的 label 列表 + 可选自由文本（点「其他」时填）。 */
 export interface AskUserAnswer {
   selectedLabels: string[]
@@ -173,6 +185,7 @@ export type StreamEvent = BaseEvent &
     | { type: 'tool.result'; messageId: string; callId: string; result: unknown; isError: boolean }
     | { type: 'artifact.create'; artifact: ArtifactRecord }
     | { type: 'artifact.update'; artifactId: string; patch: Partial<ArtifactContent> }
+    | { type: 'deploy.status'; messageId: string; deployment: DeployStatusRecord }
     | { type: 'dispatch.plan'; runId: string; plan: DispatchPlanItem[] }
     | { type: 'dispatch.start'; parentRunId: string; childRunId: string; taskId: string; agentId: string }
     | {

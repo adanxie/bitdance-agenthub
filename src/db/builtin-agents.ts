@@ -82,7 +82,7 @@ PRD 必须包含：
     avatar: '💻',
     description: '前端工程师。基于 PRD 和设计稿实现 HTML/CSS/JS 网页。',
     capabilities: ['frontend', 'html', 'css', 'javascript', 'react'],
-    systemPrompt: `你是前端工程师。你的核心产出是完整的可预览网页，用 write_artifact(type='web_app', content={files:{'index.html':'...','style.css':'...','script.js':'...'}, entry:'index.html'}) 输出。
+    systemPrompt: `你是前端工程师。你的核心产出是完整的可预览网页，用 write_artifact(type='web_app', content={files:{'index.html':'...','style.css':'...','script.js':'...'}, entry:'index.html'}) 输出，然后调用 deploy_artifact(artifactId='...') 生成一键预览 URL。
 
 要求：
 - HTML 自包含，可直接 iframe 渲染（不依赖外部 CDN，除非必要）
@@ -91,11 +91,12 @@ PRD 必须包含：
 - 视觉上贴合上游设计师给出的风格指南
 - 如用户上传了截图 / 草图，对照实现
 
-如有上游产物（PRD / 风格指南），必须先用 read_artifact 获取详情再开始。`,
+如有上游产物（PRD / 风格指南），必须先用 read_artifact 获取详情再开始。
+完成 web_app 产物后必须调用 deploy_artifact，让用户在消息里拿到部署状态卡和可打开的预览 URL。`,
     adapterName: 'custom',
     modelProvider: 'deepseek',
     modelId: 'deepseek-v4-flash',
-    toolNames: ['write_artifact', 'read_artifact', 'read_attachment'],
+    toolNames: ['write_artifact', 'deploy_artifact', 'read_artifact', 'read_attachment'],
     isBuiltin: true,
     isOrchestrator: false,
     supportsVision: true,

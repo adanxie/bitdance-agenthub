@@ -43,6 +43,14 @@ export type MobileMessagePart =
   | { type: 'tool_use'; toolName: string }
   | { type: 'tool_result'; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
+  | {
+      type: 'deploy_status'
+      title: string
+      version: number
+      previewPath: string
+      status: 'ready' | 'failed'
+      error?: string
+    }
   | { type: 'attachment'; fileName: string; kind: 'image' | 'file' }
 
 export interface MobileMessage {
@@ -265,6 +273,15 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
       return { type: 'tool_result', isError: part.isError }
     case 'artifact_ref':
       return { type: 'artifact_ref', artifactId: part.artifactId }
+    case 'deploy_status':
+      return {
+        type: 'deploy_status',
+        title: part.deployment.title,
+        version: part.deployment.version,
+        previewPath: part.deployment.previewPath,
+        status: part.deployment.status,
+        error: part.deployment.error,
+      }
     case 'image_attachment':
       return { type: 'attachment', fileName: part.fileName, kind: 'image' }
     case 'file_attachment':

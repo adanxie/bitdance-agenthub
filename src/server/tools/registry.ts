@@ -1,5 +1,6 @@
 import { askUserTool } from './ask-user'
 import { bashTool } from './bash'
+import { deployArtifactTool } from './deploy-artifact'
 import { fsReadTool } from './fs-read'
 import { fsWriteTool } from './fs-write'
 import { planTasksTool } from './plan-tasks'
@@ -59,6 +60,7 @@ function buildRegistry(): ToolRegistry {
   const reg = new ToolRegistry()
   reg.register(writeArtifactTool)
   reg.register(readArtifactTool)
+  reg.register(deployArtifactTool)
   reg.register(readAttachmentTool)
   reg.register(planTasksTool)
   reg.register(fsReadTool)

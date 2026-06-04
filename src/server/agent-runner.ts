@@ -730,6 +730,24 @@ async function consumeStream(
       })
     }
 
+    if (event.type === 'deploy.status') {
+      const parts = partsBuffer.get(event.messageId) ?? []
+      const partIndex = parts.length
+      const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
+      parts.push(deployPart)
+      partsBuffer.set(event.messageId, parts)
+      await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
+
+      publish({
+        type: 'part.start',
+        conversationId: event.conversationId,
+        timestamp: Date.now(),
+        messageId: event.messageId,
+        partIndex,
+        part: deployPart,
+      })
+    }
+
     if (event.type === 'message.end') currentMessageId = null
     if (event.type === 'tool.call') onToolCall?.(event)
   }

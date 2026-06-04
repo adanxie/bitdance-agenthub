@@ -275,6 +275,15 @@ function renderAgentPublicText(
         buf.push(title ? `[产物: ${title} (id=${p.artifactId})]` : `[产物 ${p.artifactId}]`)
         break
       }
+      case 'deploy_status':
+        if (p.deployment.status === 'ready') {
+          buf.push(
+            `[部署预览: ${p.deployment.title} v${p.deployment.version} (${p.deployment.previewPath})]`,
+          )
+        } else {
+          buf.push(`[部署失败: ${p.deployment.title} (${p.deployment.error ?? 'unknown error'})]`)
+        }
+        break
       // 跨 run 历史只保留公开输出；thinking / tool_use / tool_result 不回放。
       default:
         break

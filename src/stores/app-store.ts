@@ -787,6 +787,11 @@ function areMessagePartsEquivalent(a: MessagePart, b: MessagePart): boolean {
       )
     case 'artifact_ref':
       return b.type === 'artifact_ref' && a.artifactId === b.artifactId
+    case 'deploy_status':
+      return (
+        b.type === 'deploy_status' &&
+        areUnknownValuesEquivalent(a.deployment, b.deployment)
+      )
     case 'image_attachment':
     case 'file_attachment':
       return (

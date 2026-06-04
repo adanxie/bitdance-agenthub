@@ -11,8 +11,7 @@ import type {
   MessageInsert,
   MessageRow,
 } from '@/db/schema'
-import { clearClaudeCodeSession } from '@/server/adapters/claude-code-adapter'
-import { clearCodexSession } from '@/server/adapters/codex-adapter'
+import { clearClaudeCodeSession, clearCodexSession } from '@/server/adapters/session-store'
 import { newContextSummaryId, newMessageId } from '@/server/ids'
 import {
   getEffectiveAnthropicBaseUrl,
@@ -261,6 +260,15 @@ function renderPublicParts(
         )
         break
       }
+      case 'deploy_status':
+        if (part.deployment.status === 'ready') {
+          out.push(
+            `[deployment: ${part.deployment.title} v${part.deployment.version} (${part.deployment.previewPath})]`,
+          )
+        } else {
+          out.push(`[deployment failed: ${part.deployment.title} (${part.deployment.error ?? 'unknown error'})]`)
+        }
+        break
       case 'image_attachment':
         out.push(`[image attachment: ${part.fileName}, id=${part.attachmentId}]`)
         break

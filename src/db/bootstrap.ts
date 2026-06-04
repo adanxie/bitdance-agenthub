@@ -217,7 +217,42 @@ function ensureBuiltinAgents(sqlite: Database.Database): void {
   tx(BUILTIN_AGENTS)
 }
 
+function upgradeBuiltinAgents(sqlite: Database.Database): void {
+  const frontend = sqlite
+    .prepare('SELECT id, tool_names, system_prompt FROM agents WHERE id = ? AND is_builtin = 1')
+    .get('ag_frontend') as { id: string; tool_names: string; system_prompt: string } | undefined
+  if (!frontend) return
+
+  let changed = false
+  let toolNames: string[]
+  try {
+    const parsed = JSON.parse(frontend.tool_names) as unknown
+    toolNames = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    toolNames = []
+  }
+  if (!toolNames.includes('deploy_artifact')) {
+    const insertAfter = toolNames.indexOf('write_artifact')
+    if (insertAfter >= 0) toolNames.splice(insertAfter + 1, 0, 'deploy_artifact')
+    else toolNames.push('deploy_artifact')
+    changed = true
+  }
+
+  let systemPrompt = frontend.system_prompt
+  if (!systemPrompt.includes('deploy_artifact')) {
+    systemPrompt +=
+      '\n\n完成 web_app 产物后必须调用 deploy_artifact，让用户在消息里拿到部署状态卡和可打开的预览 URL。'
+    changed = true
+  }
+
+  if (!changed) return
+  sqlite
+    .prepare('UPDATE agents SET tool_names = ?, system_prompt = ? WHERE id = ? AND is_builtin = 1')
+    .run(JSON.stringify(toolNames), systemPrompt, frontend.id)
+}
+
 export function bootstrapDatabase(sqlite: Database.Database): void {
   ensureSchema(sqlite)
   ensureBuiltinAgents(sqlite)
+  upgradeBuiltinAgents(sqlite)
 }

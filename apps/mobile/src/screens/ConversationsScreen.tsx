@@ -9,8 +9,10 @@ import {
   FileText,
   Image as ImageIcon,
   Paperclip,
+  Rocket,
   Send,
   Wrench,
+  XCircle,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -199,6 +201,19 @@ function MessagePartView({ part }: { part: MobileMessagePart }) {
         <span className="inline-chip">
           <FileText className="inline-icon" aria-hidden="true" />
           产物：{part.artifactId}
+        </span>
+      )
+    case 'deploy_status':
+      return (
+        <span className="inline-chip">
+          {part.status === 'ready' ? (
+            <Rocket className="inline-icon" aria-hidden="true" />
+          ) : (
+            <XCircle className="inline-icon" aria-hidden="true" />
+          )}
+          {part.status === 'ready'
+            ? `部署预览：${part.title} v${part.version}`
+            : `部署失败：${part.error ?? part.title}`}
         </span>
       )
     case 'attachment':

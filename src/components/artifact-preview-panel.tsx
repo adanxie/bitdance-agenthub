@@ -1,12 +1,13 @@
 'use client'
 
-import { ChevronRight, Clock, Code, Download, Eye, FileText, History, Image as ImageIcon, Layers, X } from 'lucide-react'
+import { ChevronRight, Clock, Code, Copy, Download, ExternalLink, Eye, FileText, History, Image as ImageIcon, Layers, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactRow } from '@/db/schema'
+import { artifactPreviewPath } from '@/lib/artifact-preview'
 import { fetchArtifactVersions } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { ArtifactContent } from '@/shared/types'
@@ -88,6 +89,26 @@ export function ArtifactPreviewPanel() {
               <History className="size-4" />
             </Button>
           )}
+          {artifact.type === 'web_app' && (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => openPreviewInNewTab(artifact.id)}
+                title="打开预览 URL"
+              >
+                <ExternalLink className="size-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => copyPreviewUrl(artifact.id)}
+                title="复制预览 URL"
+              >
+                <Copy className="size-4" />
+              </Button>
+            </>
+          )}
           <a
             href={`/api/artifacts/${artifact.id}/export`}
             download
@@ -166,7 +187,7 @@ function ArtifactView({ artifact }: { artifact: ArtifactRow }) {
 
   switch (content.type) {
     case 'web_app':
-      return wrap(<WebAppView content={content} />)
+      return wrap(<WebAppView artifactId={artifact.id} content={content} />)
     case 'document':
       return wrap(<DocumentView content={content} />)
     case 'image':
@@ -185,12 +206,17 @@ function ArtifactView({ artifact }: { artifact: ArtifactRow }) {
 }
 
 // ─── web_app: iframe + 源码 ───────────────────────────
-function WebAppView({ content }: { content: Extract<ArtifactContent, { type: 'web_app' }> }) {
+function WebAppView({
+  artifactId,
+  content,
+}: {
+  artifactId: string
+  content: Extract<ArtifactContent, { type: 'web_app' }>
+}) {
   const [view, setView] = useState<'render' | 'source'>('render')
   const [activeFile, setActiveFile] = useState<string>(content.entry)
 
   const fileNames = Object.keys(content.files)
-  const html = buildIframeHtml(content.files, content.entry)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -223,8 +249,8 @@ function WebAppView({ content }: { content: Extract<ArtifactContent, { type: 'we
       <div className="min-h-0 flex-1">
         {view === 'render' ? (
           <iframe
-            key={html.length}
-            srcDoc={html}
+            key={artifactId}
+            src={artifactPreviewPath(artifactId)}
             sandbox="allow-scripts"
             className="size-full border-0 bg-white"
             title="Artifact preview"
@@ -335,36 +361,11 @@ function TypeIcon({ type }: { type: string }) {
   return <Layers className="size-4 text-muted-foreground" />
 }
 
-// ─── iframe HTML 构造 ────────────────────────────────
-function buildIframeHtml(files: Record<string, string>, entry: string): string {
-  const html = files[entry] ?? files['index.html'] ?? ''
-  const css = files['style.css'] ?? files['styles.css'] ?? ''
-  const js = files['script.js'] ?? files['main.js'] ?? files['app.js'] ?? ''
+function openPreviewInNewTab(artifactId: string): void {
+  window.open(artifactPreviewPath(artifactId), '_blank', 'noopener,noreferrer')
+}
 
-  const styleTag = css ? `<style>\n${css}\n</style>` : ''
-  // JSON.stringify 把代码作为字符串塞进 <script>，避免里面出现 </script> 把外层标签提前关掉
-  const scriptTag = js
-    ? `<script>(function(){\n${js}\n})();<` + '/script>'
-    : ''
-
-  // 如果是完整 HTML 文档，在 </head> 前插 style，</body> 前插 script
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${styleTag}\n</head>`).replace(/<\/body>/i, `${scriptTag}\n</body>`)
-  }
-
-  // 片段：包一层完整文档
-  return [
-    '<!doctype html>',
-    '<html lang="zh-CN">',
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width,initial-scale=1">',
-    styleTag,
-    '</head>',
-    '<body>',
-    html,
-    scriptTag,
-    '</body>',
-    '</html>',
-  ].join('\n')
+function copyPreviewUrl(artifactId: string): void {
+  const url = new URL(artifactPreviewPath(artifactId), window.location.origin).toString()
+  navigator.clipboard?.writeText(url).catch(() => {})
 }

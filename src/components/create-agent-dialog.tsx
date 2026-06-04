@@ -37,8 +37,8 @@ const PROVIDER_DEFAULTS: Record<Provider, { label: string; defaultModel: string 
 const CLAUDE_CODE_DEFAULT_MODEL = 'claude-opus-4-7'
 const CODEX_DEFAULT_MODEL = 'gpt-5-codex'
 
-const AVAILABLE_TOOLS = ['write_artifact', 'read_artifact', 'read_attachment', 'fs_read', 'fs_write', 'bash'] as const
-const DEFAULT_CUSTOM_TOOLS = ['write_artifact', 'read_artifact', 'read_attachment'] as const
+const AVAILABLE_TOOLS = ['write_artifact', 'deploy_artifact', 'read_artifact', 'read_attachment', 'fs_read', 'fs_write', 'bash'] as const
+const DEFAULT_CUSTOM_TOOLS = ['write_artifact', 'deploy_artifact', 'read_artifact', 'read_attachment'] as const
 
 /**
  * 创建 / 编辑 Agent 的对话框。
