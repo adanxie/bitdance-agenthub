@@ -19,6 +19,7 @@ export async function startEmbeddedServer(): Promise<number> {
 
   process.env.PORT = String(port)
   process.env.HOSTNAME = hostname
+  process.env.AGENTHUB_INTERNAL_BASE_URL = `http://127.0.0.1:${port}`
   process.env.NEXT_TELEMETRY_DISABLED = '1'
   if (enabled && companion.mobileDeviceToken) {
     process.env.AGENTHUB_MOBILE_TOKEN = companion.mobileDeviceToken

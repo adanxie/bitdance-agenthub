@@ -17,7 +17,9 @@ export function newMobileDeviceToken(): string {
 }
 
 export function writeCompanionConfig(config: CompanionConfig): void {
-  const dataDir = process.env.AGENTHUB_DATA_DIR ?? path.resolve(process.cwd(), '.agenthub-data')
+  const dataDir =
+    process.env.AGENTHUB_DATA_DIR ??
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), '.agenthub-data')
   mkdirSync(dataDir, { recursive: true })
   writeFileSync(
     path.join(dataDir, 'companion.json'),

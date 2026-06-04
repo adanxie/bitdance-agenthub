@@ -9,9 +9,7 @@ import type { ConversationWithMeta } from '@/db/schema'
 import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
 import type { MessagePart } from '@/shared/types'
 
-import { AgentRunner } from './agent-runner'
-import { clearClaudeCodeSession } from './adapters/claude-code-adapter'
-import { clearCodexSession } from './adapters/codex-adapter'
+import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
 import {
   newConversationId,
   newMessageId,
@@ -22,8 +20,13 @@ import { isPathSafe } from './workspace-utils'
 
 // Electron 模式下 main 进程注入 AGENTHUB_DATA_DIR；web / dev 走 cwd 兜底（详见 Spec 12 §5）
 const DATA_DIR =
-  process.env.AGENTHUB_DATA_DIR ?? path.resolve(process.cwd(), '.agenthub-data')
+  process.env.AGENTHUB_DATA_DIR ??
+  path.resolve(/* turbopackIgnore: true */ process.cwd(), '.agenthub-data')
 const WORKSPACES_ROOT = path.join(DATA_DIR, 'workspaces')
+
+async function getAgentRunner() {
+  return import('./agent-runner')
+}
 
 /**
  * 删除 workspace 目录。Windows 上 EBUSY/EPERM/ENOTEMPTY 走指数退避（详见 specs/11-platform.md）：
@@ -570,6 +573,7 @@ export async function sendMessage(args: SendMessageArgs) {
   const responders = decideResponders(conv, args.mentionedAgentIds ?? [], agentsInConv)
 
   const runIds: string[] = []
+  const { AgentRunner } = await getAgentRunner()
   for (const agentId of responders) {
     const { runId } = AgentRunner.run({
       agentId,
@@ -601,7 +605,8 @@ function decideResponders(
 }
 
 // ─── 中止 run ────────────────────────────────────────────
-export function abortRun(runId: string): boolean {
+export async function abortRun(runId: string): Promise<boolean> {
+  const { AgentRunner } = await getAgentRunner()
   return AgentRunner.abort(runId)
 }
 
@@ -653,10 +658,10 @@ export async function withdrawLatestUserMessage(
       eq(schema.agentRuns.status, 'running'),
     ),
   })
-  for (const r of runsToAbort) AgentRunner.abort(r.id)
-
-  // 让 finalize 跑完，把 emitErrorVisualisation 的 msg_err_* 也落进时间窗
   if (runsToAbort.length > 0) {
+    const { AgentRunner } = await getAgentRunner()
+    for (const r of runsToAbort) AgentRunner.abort(r.id)
+    // 让 finalize 跑完，把 emitErrorVisualisation 的 msg_err_* 也落进时间窗
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
 
@@ -748,8 +753,9 @@ export async function regenerateLatestResponse(
       eq(schema.agentRuns.status, 'running'),
     ),
   })
-  for (const r of runsToAbort) AgentRunner.abort(r.id)
   if (runsToAbort.length > 0) {
+    const { AgentRunner } = await getAgentRunner()
+    for (const r of runsToAbort) AgentRunner.abort(r.id)
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
 
@@ -802,6 +808,7 @@ export async function regenerateLatestResponse(
   const responders = decideResponders(conv, latestUser.mentionedAgentIds, agentsInConv)
 
   const newRunIds: string[] = []
+  const { AgentRunner } = await getAgentRunner()
   for (const agentId of responders) {
     const { runId } = AgentRunner.run({
       agentId,

@@ -8,7 +8,8 @@ import * as schema from './schema'
 
 // Electron 模式下 main 进程注入 AGENTHUB_DATA_DIR 指向 userData；web / dev 走 cwd 兜底（详见 Spec 12 §5）
 const DATA_DIR =
-  process.env.AGENTHUB_DATA_DIR ?? path.resolve(process.cwd(), '.agenthub-data')
+  process.env.AGENTHUB_DATA_DIR ??
+  path.resolve(/* turbopackIgnore: true */ process.cwd(), '.agenthub-data')
 const DB_PATH = path.join(DATA_DIR, 'agenthub.db')
 
 mkdirSync(DATA_DIR, { recursive: true })

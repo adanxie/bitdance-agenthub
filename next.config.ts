@@ -10,7 +10,44 @@ const nextConfig: NextConfig = {
     '@anthropic-ai/claude-agent-sdk',
     '@openai/codex-sdk',
     '@openai/codex',
+    '@modelcontextprotocol/sdk',
   ],
+
+  outputFileTracingIncludes: {
+    '/*': ['scripts/agenthub-codex-mcp.mjs'],
+  },
+
+  outputFileTracingExcludes: {
+    '/*': [
+      '.agenthub-data/**',
+      '.claude/**',
+      '.git/**',
+      '.understand-anything/**',
+      '*.md',
+      '*.txt',
+      'components.json',
+      'drizzle.config.ts',
+      'eslint.config.mjs',
+      'apps/**',
+      'dist-electron/**',
+      'electron/**',
+      'next.config.ts',
+      'openspec/**',
+      'packages/**',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'postcss.config.mjs',
+      'public/**',
+      'release/**',
+      'scripts/electron-*.mjs',
+      'scripts/run-electron-node.mjs',
+      'skills/**',
+      'specs/**',
+      'src/**',
+      'tsconfig*.json',
+      'tsconfig.tsbuildinfo',
+    ],
+  },
 }
 
 export default nextConfig

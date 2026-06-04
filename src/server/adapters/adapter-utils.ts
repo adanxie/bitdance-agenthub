@@ -13,19 +13,6 @@ export function createAdapterEvent(conversationId: string) {
     }) as unknown as StreamEvent
 }
 
-export function createAdapterSessionStore(namespace: string): Map<string, string> {
-  const globalStore = globalThis as unknown as {
-    __agenthubAdapterSessions?: Record<string, Map<string, string>>
-  }
-  globalStore.__agenthubAdapterSessions ??= {}
-  globalStore.__agenthubAdapterSessions[namespace] ??= new Map()
-  return globalStore.__agenthubAdapterSessions[namespace]
-}
-
-export function adapterSessionKey(conversationId: string, agentId: string): string {
-  return `${conversationId}:${agentId}`
-}
-
 export function buildChildProcessEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
@@ -63,5 +50,8 @@ export function isAbortLikeError(err: unknown, signal: AbortSignal): boolean {
 }
 
 function getAgentHubDataDir(): string {
-  return process.env.AGENTHUB_DATA_DIR ?? path.resolve(process.cwd(), '.agenthub-data')
+  return (
+    process.env.AGENTHUB_DATA_DIR ??
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), '.agenthub-data')
+  )
 }

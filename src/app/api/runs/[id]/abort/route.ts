@@ -8,7 +8,7 @@ interface RouteContext {
 
 export async function POST(_req: Request, ctx: RouteContext) {
   const { id } = await ctx.params
-  const ok = abortRun(id)
+  const ok = await abortRun(id)
   if (!ok) {
     return NextResponse.json({ error: 'Run not found or already finished' }, { status: 404 })
   }
