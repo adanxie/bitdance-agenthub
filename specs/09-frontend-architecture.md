@@ -192,7 +192,7 @@ useEffect(() => {
 ```
 app/page.tsx
 └── <Home>
-    ├── <Sidebar />               ── 会话/Agent库/产物库 三 tab 切换
+    ├── <Sidebar />               ── 对话/产物库/Agents/分析 四 tab 切换
     │   ├── <ThemeToggle />
     │   ├── <NewConversationDialog />
     │   ├── <ConversationItem />  ── 单条会话 + hover 重命名/删除
