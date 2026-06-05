@@ -12,6 +12,7 @@ export type MessagePart =
   | { type: 'tool_result'; callId: string; result: unknown; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
   | { type: 'deploy_status'; deployment: DeployStatusRecord }
+  | { type: 'deploy_candidates'; candidates: DeployCandidateRecord[] }
   | {
       type: 'image_attachment'
       attachmentId: string
@@ -165,6 +166,14 @@ export interface DeployStatusRecord {
   containerDownloadPath?: string
   summaryInstruction?: string
   error?: string
+  createdAt: number
+}
+
+export interface DeployCandidateRecord {
+  artifactId: string
+  title: string
+  version: number
+  createdByAgentId: string
   createdAt: number
 }
 /** 单条问题的答案：选中的 label 列表 + 可选自由文本（点「其他」时填）。 */

@@ -6,7 +6,14 @@ import { listAgentsOrdered } from '@/server/agent-service'
 import { listConversations, listMessages, sendMessage } from '@/server/conversation-service'
 import { pendingQuestions } from '@/server/pending-questions'
 import { pendingWrites } from '@/server/pending-writes'
-import type { ArtifactContent, ArtifactType, MessagePart, PendingQuestion, PendingWrite } from '@/shared/types'
+import type {
+  ArtifactContent,
+  ArtifactType,
+  DeployCandidateRecord,
+  MessagePart,
+  PendingQuestion,
+  PendingWrite,
+} from '@/shared/types'
 
 import packageJson from '../../package.json'
 
@@ -51,6 +58,7 @@ export type MobileMessagePart =
       status: 'ready' | 'failed'
       error?: string
     }
+  | { type: 'deploy_candidates'; candidates: DeployCandidateRecord[] }
   | { type: 'attachment'; fileName: string; kind: 'image' | 'file' }
 
 export interface MobileArtifactSummary {
@@ -319,6 +327,8 @@ function toMobileMessagePart(part: MessagePart): MobileMessagePart {
         status: part.deployment.status,
         error: part.deployment.error,
       }
+    case 'deploy_candidates':
+      return { type: 'deploy_candidates', candidates: part.candidates }
     case 'image_attachment':
       return { type: 'attachment', fileName: part.fileName, kind: 'image' }
     case 'file_attachment':

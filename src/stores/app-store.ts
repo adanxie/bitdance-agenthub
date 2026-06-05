@@ -792,6 +792,11 @@ function areMessagePartsEquivalent(a: MessagePart, b: MessagePart): boolean {
         b.type === 'deploy_status' &&
         areUnknownValuesEquivalent(a.deployment, b.deployment)
       )
+    case 'deploy_candidates':
+      return (
+        b.type === 'deploy_candidates' &&
+        areUnknownValuesEquivalent(a.candidates, b.candidates)
+      )
     case 'image_attachment':
     case 'file_attachment':
       return (

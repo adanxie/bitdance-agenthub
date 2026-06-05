@@ -40,53 +40,54 @@ export const deployArtifactTool: ToolDef = {
       return { ok: false, error: `Invalid args: ${parsed.error.message}` }
     }
 
-    const artifact = await db.query.artifacts.findFirst({
-      where: and(
-        eq(schema.artifacts.id, parsed.data.artifactId),
-        eq(schema.artifacts.conversationId, ctx.conversationId),
-      ),
-    })
-    if (!artifact) {
-      return {
-        ok: true,
-        value: failedDeployment(parsed.data.artifactId, 'Unknown artifact', 'Artifact not found'),
-      }
-    }
-
-    const content = artifact.content as ArtifactContent
-    if (content.type !== 'web_app') {
-      return {
-        ok: true,
-        value: failedDeployment(
-          artifact.id,
-          artifact.title,
-          `Artifact type "${content.type}" cannot be deployed as a web app`,
-          artifact.version,
-        ),
-      }
-    }
-
-    try {
-      const local = createLocalStaticDeployment({
-        id: newDeploymentId(),
-        artifactId: artifact.id,
-        title: artifact.title,
-        version: artifact.version,
-        content,
-      })
-      return { ok: true, value: await maybePublishExternally(local) }
-    } catch (error) {
-      return {
-        ok: true,
-        value: failedDeployment(
-          artifact.id,
-          artifact.title,
-          error instanceof Error ? error.message : 'Failed to create deployment',
-          artifact.version,
-        ),
-      }
+    return {
+      ok: true,
+      value: await deployArtifactForConversation(ctx.conversationId, parsed.data.artifactId),
     }
   },
+}
+
+export async function deployArtifactForConversation(
+  conversationId: string,
+  artifactId: string,
+): Promise<DeployStatusRecord> {
+  const artifact = await db.query.artifacts.findFirst({
+    where: and(
+      eq(schema.artifacts.id, artifactId),
+      eq(schema.artifacts.conversationId, conversationId),
+    ),
+  })
+  if (!artifact) {
+    return failedDeployment(artifactId, 'Unknown artifact', 'Artifact not found')
+  }
+
+  const content = artifact.content as ArtifactContent
+  if (content.type !== 'web_app') {
+    return failedDeployment(
+      artifact.id,
+      artifact.title,
+      `Artifact type "${content.type}" cannot be deployed as a web app`,
+      artifact.version,
+    )
+  }
+
+  try {
+    const local = createLocalStaticDeployment({
+      id: newDeploymentId(),
+      artifactId: artifact.id,
+      title: artifact.title,
+      version: artifact.version,
+      content,
+    })
+    return maybePublishExternally(local)
+  } catch (error) {
+    return failedDeployment(
+      artifact.id,
+      artifact.title,
+      error instanceof Error ? error.message : 'Failed to create deployment',
+      artifact.version,
+    )
+  }
 }
 
 async function maybePublishExternally(local: DeployStatusRecord): Promise<DeployStatusRecord> {

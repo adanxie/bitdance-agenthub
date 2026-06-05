@@ -110,6 +110,18 @@ export const toolRegistry = buildRegistry()
 
 **外部静态发布目录**：`deployment_publish_dir` 必须是绝对路径且不能是文件系统根目录。发布时只删除 / 覆盖 `<publishDir>/<deploymentId>` 子目录，且复制公开文件时不会带上 `.agenthub` 私有目录。`deployment_public_base_url` 是用户已有静态服务的公开根 URL，AgentHub 只负责写文件，不启动托管服务。
 
+### 确定性部署命令
+
+源文件：`src/server/deploy-command-service.ts`、`src/app/api/conversations/[id]/deploy/route.ts`
+
+用户发送精确命令 `部署` / `发布` / `上线` / `/deploy` 时，`conversation-service.sendMessage` 在 responder 选择前拦截，不启动 AgentRun。命令只作用于当前会话的 `web_app` artifacts：
+
+- 0 个候选：插入 system text message，提示当前会话没有可部署网页产物。
+- 1 个候选：复用 `deploy_artifact` 的会话级 helper 直接部署，并插入 `deploy_status` part。
+- 多个候选：插入 `deploy_candidates` part，让用户在 UI 中选择。选择后由 `POST /api/conversations/:id/deploy { artifactId }` 部署并插入 `deploy_status` part。
+
+命令可带明确 artifact id：`/deploy art_xxx` / `部署 art_xxx`。服务端仍校验 artifact 必须属于当前会话且是 `web_app`；缺失或类型错误通过 failed `DeployStatusRecord` 展示。
+
 ### read_artifact
 
 源文件：`src/server/tools/read-artifact.ts`

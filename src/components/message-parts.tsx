@@ -6,16 +6,23 @@ import { useEffect, useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { AttachmentChip } from '@/components/attachment-chip'
+import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/code-block'
 import { Markdown } from '@/components/markdown'
 import { artifactPreviewPath } from '@/lib/artifact-preview'
-import { fetchArtifact } from '@/lib/api'
+import { deployConversationArtifact, fetchArtifact } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { MessagePart } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
 // ─── PartList: 调度入口 ─────────────────────────────────
-export function PartList({ parts }: { parts: MessagePart[] }) {
+export function PartList({
+  parts,
+  conversationId,
+}: {
+  parts: MessagePart[]
+  conversationId: string
+}) {
   // 把 tool_result 按 callId 提前到对应 tool_use 的状态里
   const resultByCallId = new Map<string, { result: unknown; isError: boolean }>()
   for (const p of parts) {
@@ -48,7 +55,7 @@ export function PartList({ parts }: { parts: MessagePart[] }) {
     <div className="space-y-2">
       {clusters.map((c, i) => {
         if (c.kind === 'part') {
-          return <PartRenderer key={`p-${c.index}`} part={c.part} />
+          return <PartRenderer key={`p-${c.index}`} part={c.part} conversationId={conversationId} />
         }
         // tool cluster
         if (c.tools.length === 1) {
@@ -76,7 +83,13 @@ export function PartList({ parts }: { parts: MessagePart[] }) {
   )
 }
 
-function PartRenderer({ part }: { part: MessagePart }) {
+function PartRenderer({
+  part,
+  conversationId,
+}: {
+  part: MessagePart
+  conversationId: string
+}) {
   switch (part.type) {
     case 'text':
       return <TextPart content={part.content} />
@@ -88,6 +101,8 @@ function PartRenderer({ part }: { part: MessagePart }) {
       return <ArtifactRefPart artifactId={part.artifactId} />
     case 'deploy_status':
       return <DeployStatusPart deployment={part.deployment} />
+    case 'deploy_candidates':
+      return <DeployCandidatesPart conversationId={conversationId} candidates={part.candidates} />
     case 'image_attachment':
     case 'file_attachment':
       return (
@@ -526,6 +541,97 @@ function ArtifactIcon({ type }: { type: string }) {
   return <Layers className="size-5 shrink-0 text-muted-foreground" />
 }
 
+function DeployCandidatesPart({
+  conversationId,
+  candidates,
+}: {
+  conversationId: string
+  candidates: Extract<MessagePart, { type: 'deploy_candidates' }>['candidates']
+}) {
+  const agents = useAppStore((s) => s.agents)
+  const upsertMessage = useAppStore((s) => s.upsertMessage)
+  const [deployingId, setDeployingId] = useState<string | null>(null)
+  const [deployedId, setDeployedId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const deploy = async (artifactId: string) => {
+    if (deployingId) return
+    setDeployingId(artifactId)
+    setError(null)
+    try {
+      const result = await deployConversationArtifact(conversationId, artifactId)
+      upsertMessage(result.message)
+      setDeployedId(artifactId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeployingId(null)
+    }
+  }
+
+  return (
+    <Card className="border-sky-200 bg-sky-50/50 dark:border-sky-900/50 dark:bg-sky-950/20">
+      <CardContent className="space-y-2 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Rocket className="size-4 shrink-0 text-sky-600 dark:text-sky-400" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">选择要部署的产物</div>
+            <div className="text-xs text-muted-foreground">
+              当前会话有 {candidates.length} 个网页产物
+            </div>
+          </div>
+        </div>
+
+        <div className="divide-y rounded-md border bg-background/70">
+          {candidates.map((candidate) => {
+            const agent = agents[candidate.createdByAgentId]
+            const busy = deployingId === candidate.artifactId
+            const deployed = deployedId === candidate.artifactId
+            return (
+              <div
+                key={candidate.artifactId}
+                className="flex items-center gap-3 px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{candidate.title}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    v{candidate.version} · {agent?.name ?? candidate.createdByAgentId} ·{' '}
+                    {formatCompactDate(candidate.createdAt)}
+                  </div>
+                  <div className="truncate font-mono text-[10px] text-muted-foreground/70">
+                    {candidate.artifactId}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={deployed ? 'secondary' : 'outline'}
+                  disabled={Boolean(deployingId) || deployed}
+                  onClick={() => void deploy(candidate.artifactId)}
+                  className="shrink-0"
+                >
+                  {busy ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  ) : (
+                    <Rocket className="mr-1.5 size-3.5" />
+                  )}
+                  {deployed ? '已部署' : '部署'}
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
+            {error}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function DeployStatusPart({
   deployment,
 }: {
@@ -682,4 +788,13 @@ function copyPath(path: string): void {
 
 function resolvePreviewUrl(path: string): string {
   return new URL(path, window.location.origin).toString()
+}
+
+function formatCompactDate(ts: number): string {
+  return new Date(ts).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

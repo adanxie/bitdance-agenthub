@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Download,
   Paperclip,
+  Rocket,
   Send,
   Settings,
   Shield,
@@ -59,6 +60,13 @@ interface SlashTrigger {
 }
 
 const SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    id: 'deploy',
+    command: '/deploy',
+    label: '部署产物',
+    description: '部署当前会话的网页产物',
+    icon: Rocket,
+  },
   {
     id: 'compact',
     command: '/compact',
@@ -172,6 +180,10 @@ function renderMessagePartForExport(part: MessageRow['parts'][number]): string {
       return part.deployment.status === 'ready'
         ? `[Deployment: ${part.deployment.title} v${part.deployment.version} (${part.deployment.previewPath})]`
         : `[Deployment failed: ${part.deployment.title} (${part.deployment.error ?? 'unknown error'})]`
+    case 'deploy_candidates':
+      return `[Deployment candidates: ${part.candidates
+        .map((candidate) => `${candidate.title} v${candidate.version} (${candidate.artifactId})`)
+        .join(', ')}]`
     case 'image_attachment':
     case 'file_attachment':
       return `[Attachment: ${part.fileName} (${part.attachmentId}, ${part.mimeType}, ${part.size} bytes)]`
@@ -279,6 +291,18 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const slashCommands = useMemo<SlashCommandItem[]>(
     () =>
       SLASH_COMMANDS.map((command) => {
+        if (command.id === 'deploy') {
+          return {
+            ...command,
+            description:
+              pending.length > 0 || uploading.length > 0
+                ? '请先移除附件'
+                : isRunning
+                  ? '请先中止正在运行的 Agent'
+                  : command.description,
+            disabled: sending || isRunning || pending.length > 0 || uploading.length > 0,
+          }
+        }
         if (command.id === 'compact') {
           return {
             ...command,
@@ -519,9 +543,42 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     }
   }
 
+  const executeDeployCommand = async () => {
+    if (sending || isRunning || pending.length > 0 || uploading.length > 0) return
+    clearSlashCommandInput()
+    if (pendingQuote) setPendingQuote(null)
+    if (replyTargetId) setReplyTarget(conversationId, null)
+
+    const tempId = `temp_${nanoid()}`
+    addLocalUserMessage({
+      tempId,
+      conversationId,
+      content: '/deploy',
+      mentionedAgentIds: [],
+      attachments: [],
+    })
+    setSending(true)
+    try {
+      const result = await sendMessageAPI(conversationId, { content: '/deploy' })
+      replaceLocalMessageId(tempId, result.messageId)
+      upsertReturnedMessages(result.messages)
+    } catch (err) {
+      console.error('[MessageInput] deploy failed', err)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const upsertReturnedMessages = (messages: MessageRow[] | undefined) => {
+    for (const message of messages ?? []) upsertMessage(message)
+  }
+
   const executeSlashCommand = async (command: SlashCommandItem) => {
     if (command.disabled) return
     switch (command.id) {
+      case 'deploy':
+        await executeDeployCommand()
+        break
       case 'compact':
         await executeCompactCommand()
         break
@@ -643,13 +700,14 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setSending(true)
 
     try {
-      const { messageId } = await sendMessageAPI(conversationId, {
+      const result = await sendMessageAPI(conversationId, {
         content: finalContent,
         mentionedAgentIds: mentionedIds,
         parentMessageId: parentId,
         attachmentIds,
       })
-      replaceLocalMessageId(tempId, messageId)
+      replaceLocalMessageId(tempId, result.messageId)
+      upsertReturnedMessages(result.messages)
     } catch (err) {
       console.error('[MessageInput] send failed', err)
     } finally {

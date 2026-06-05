@@ -5,11 +5,16 @@ import path from 'node:path'
 import { and, desc, eq, gt, gte, inArray } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
-import type { ConversationWithMeta } from '@/db/schema'
+import type { ConversationWithMeta, MessageRow } from '@/db/schema'
 import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
+import {
+  handleDeployCommand,
+  parseDeployCommand,
+  type DeployCommandResult,
+} from './deploy-command-service'
 import {
   newConversationId,
   newMessageId,
@@ -508,7 +513,14 @@ export interface SendMessageArgs {
   attachmentIds?: string[]
 }
 
-export async function sendMessage(args: SendMessageArgs) {
+export interface SendMessageResult {
+  messageId: string
+  runIds: string[]
+  messages?: MessageRow[]
+  deploy?: DeployCommandResult
+}
+
+export async function sendMessage(args: SendMessageArgs): Promise<SendMessageResult> {
   const conv = await db.query.conversations.findFirst({
     where: eq(schema.conversations.id, args.conversationId),
   })
@@ -565,6 +577,22 @@ export async function sendMessage(args: SendMessageArgs) {
     .update(schema.conversations)
     .set({ updatedAt: now })
     .where(eq(schema.conversations.id, args.conversationId))
+
+  const deployIntent =
+    parts.length === 1 &&
+    !args.parentMessageId &&
+    !(args.mentionedAgentIds && args.mentionedAgentIds.length > 0) &&
+    !(args.attachmentIds && args.attachmentIds.length > 0)
+      ? parseDeployCommand(args.content)
+      : null
+  if (deployIntent) {
+    const deploy = await handleDeployCommand({
+      conversationId: args.conversationId,
+      artifactId: deployIntent.artifactId,
+      afterCreatedAt: now,
+    })
+    return { messageId, runIds: [], messages: [deploy.message], deploy }
+  }
 
   // 决定 responder
   const agentsInConv = await db.query.agents.findMany({

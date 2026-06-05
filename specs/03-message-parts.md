@@ -1,6 +1,6 @@
 # Spec 03 — MessagePart 类型
 
-> Message 是「容器」，真正内容在 `parts: MessagePart[]`。本 spec 定义 9 种 part 类型与对应的渲染、增量协议、新增步骤。**修改 part 类型需先讨论。**
+> Message 是「容器」，真正内容在 `parts: MessagePart[]`。本 spec 定义 10 种 part 类型与对应的渲染、增量协议、新增步骤。**修改 part 类型需先讨论。**
 
 源文件：`src/shared/types.ts:7-27`、`src/components/message-parts.tsx`
 
@@ -26,6 +26,7 @@ type MessagePart =
   | { type: 'tool_result'; callId: string; result: unknown; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
   | { type: 'deploy_status'; deployment: DeployStatusRecord }
+  | { type: 'deploy_candidates'; candidates: DeployCandidateRecord[] }
   | { type: 'image_attachment';
       attachmentId: string; fileName: string; size: number; mimeType: string }
   | { type: 'file_attachment';
@@ -36,7 +37,7 @@ type MessagePart =
 
 ---
 
-## 8 种 part 详解
+## 10 种 part 详解
 
 ### 1. `text`
 
@@ -123,9 +124,17 @@ Agent 的主要文字输出。content 是 markdown 文本，前端用 `react-mar
 
 展示一次 web_app 部署状态。`status='ready'` 时卡片提供打开 / 复制预览 URL；本地静态发布记录还提供源码包 / 容器包下载；外部静态发布记录显示公开 URL 与本地回退路径；`status='failed'` 时展示失败原因。
 
-**注入路径**：Adapter 在 `deploy_artifact` 成功返回部署记录后 emit `deploy.status`，AgentRunner 在当前 message 末尾 push `deploy_status` 并补发 `part.start`。
+**注入路径**：Adapter 在 `deploy_artifact` 成功返回部署记录后 emit `deploy.status`，AgentRunner 在当前 message 末尾 push `deploy_status` 并补发 `part.start`。确定性部署命令（`部署` / `发布` / `上线` / `/deploy`）不经过 Adapter，也可以直接由 `deploy-command-service` 创建包含 `deploy_status` 的 system message。
 
-### 8. `image_attachment`
+### 8. `deploy_candidates`
+
+```typescript
+{ type: 'deploy_candidates', candidates: DeployCandidateRecord[] }
+```
+
+当用户触发确定性部署命令且当前会话存在多个 `web_app` 产物时展示候选选择。前端候选卡显示标题、版本、创建 Agent、创建时间，并为每个候选提供“部署”操作；选择后调用会话部署 API，服务端再插入 `deploy_status` message。
+
+### 9. `image_attachment`
 
 ```typescript
 { type: 'image_attachment', attachmentId: string, fileName: string, size: number, mimeType: string }
@@ -137,7 +146,7 @@ Agent 的主要文字输出。content 是 markdown 文本，前端用 `react-mar
 
 **LLM 投递**：服务端 `sendMessage` 后，AgentRunner 通过 `AdapterInput.attachments` 把附件传给 Adapter，Adapter 在 agent `supportsVision=true` 时把图片以 OpenAI image_url block (`data:<mime>;base64,...`) 投给 LLM（详见 Spec 05）。
 
-### 8. `file_attachment`
+### 10. `file_attachment`
 
 ```typescript
 { type: 'file_attachment', attachmentId: string, fileName: string, size: number, mimeType: string }
@@ -195,6 +204,7 @@ function PartList({ parts }) {
 | `tool_result` | （跳过） | 由 ToolUsePart 吸收 |
 | `artifact_ref` | `<ArtifactRefPart>` | 卡片，lazy fetch |
 | `deploy_status` | `<DeployStatusPart>` | 部署状态卡，ready 时带打开/复制，存在下载路径时带源码包/容器包下载 |
+| `deploy_candidates` | `<DeployCandidatesPart>` | 多个 web_app 候选选择卡，点击后调用部署 API |
 | `image_attachment` | `<AttachmentChip context="message">` | 图片缩略 |
 | `file_attachment` | `<AttachmentChip context="message">` | 文件 chip |
 
@@ -224,6 +234,7 @@ LLM 下一轮 turn 需要 history（assistant 的旧消息回传 messages 数组
 | `tool_result` | `[<toolName> 结果: <result 摘要>]` |
 | `artifact_ref` | `[产物: art_xxx]` |
 | `deploy_status` | `[部署预览: title vN (/deployments/dep_xxx)]` 或 `[部署失败: ...]` |
+| `deploy_candidates` | `[部署候选: title vN (id=art_xxx), ...]` |
 | 附件 | `[图片附件: <fileName>]` / `[文件附件: <fileName>]` |
 
 具体实现见 `agent-runner.ts` 的 `extractTextFromParts`（拼回字符串） + `buildMessagesForLLM`（构造 OpenAI format）。

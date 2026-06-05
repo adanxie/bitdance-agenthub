@@ -104,6 +104,8 @@ interface AppState {
 
 **部署卡片**：`DeployStatusPart` 根据 `DeployStatusRecord.deploymentType` 区分本地静态部署与外部静态发布。`external_static` 时，`previewPath` 是公开 URL，卡片必须继续提供打开 / 复制操作，并在 `localPreviewPath` 存在时显示本地回退路径。源码包 / 容器包下载仍来自本地 deployment id。
 
+**部署候选卡片**：`DeployCandidatesPart` 渲染 `deploy_candidates` message part。卡片列出当前会话多个 `web_app` 候选，每项显示标题、版本、创建 Agent、时间与 artifact id。点击候选的部署按钮调用 `POST /api/conversations/:id/deploy`，成功后把返回的 system message upsert 到 store；不通过 SSE，也不启动 AgentRun。
+
 ---
 
 ## 乐观更新：本地用户消息
@@ -247,7 +249,7 @@ app/page.tsx
 
 **404 行为**：artifact lazy fetch 404 → 渲染「产物已删除」墓碑卡片（不在 store 标记 deleted；用组件 local state）。
 
-`web_app` artifact 卡、ArtifactPreviewPanel 顶部和 `deploy_status` 卡都提供打开 / 复制预览 URL。URL 由当前 `window.location.origin + previewPath` 生成，避免把 dev 端口或 packaged 随机端口持久化进消息。ready 的本地静态发布卡如果带 `sourceDownloadPath` / `containerDownloadPath`，还展示源码包与容器包下载按钮。
+`web_app` artifact 卡、ArtifactPreviewPanel 顶部和 `deploy_status` 卡都提供打开 / 复制预览 URL。URL 由当前 `window.location.origin + previewPath` 生成，避免把 dev 端口或 packaged 随机端口持久化进消息。ready 的本地静态发布卡如果带 `sourceDownloadPath` / `containerDownloadPath`，还展示源码包与容器包下载按钮。`/deploy` slash command 与直接发送 `部署` / `发布` / `上线` 使用同一套确定性部署 API；多个候选时展示 `deploy_candidates` 卡片。
 
 ---
 

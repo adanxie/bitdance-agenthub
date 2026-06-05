@@ -7,7 +7,13 @@ import type {
   ContextSummaryRow,
   MessageRow,
 } from '@/db/schema'
-import type { AskUserAnswer, PendingQuestion, PendingWrite } from '@/shared/types'
+import type {
+  AskUserAnswer,
+  DeployCandidateRecord,
+  DeployStatusRecord,
+  PendingQuestion,
+  PendingWrite,
+} from '@/shared/types'
 
 export interface ArtifactListItem {
   id: string
@@ -265,6 +271,8 @@ export interface SendMessageBody {
 export interface SendMessageResult {
   messageId: string
   runIds: string[]
+  messages?: MessageRow[]
+  deploy?: DeployConversationResult
 }
 
 export async function sendMessage(
@@ -276,6 +284,45 @@ export async function sendMessage(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    }),
+  )
+}
+
+export type DeployConversationResult =
+  | {
+      kind: 'no_candidates'
+      candidates: []
+      message: MessageRow
+    }
+  | {
+      kind: 'candidate_selection'
+      candidates: DeployCandidateRecord[]
+      message: MessageRow
+    }
+  | {
+      kind: 'deployed'
+      deployment: DeployStatusRecord
+      message: MessageRow
+    }
+
+export async function fetchDeployCandidates(
+  conversationId: string,
+): Promise<DeployCandidateRecord[]> {
+  const { candidates } = await json<{ candidates: DeployCandidateRecord[] }>(
+    fetch(`/api/conversations/${conversationId}/deploy`),
+  )
+  return candidates
+}
+
+export async function deployConversationArtifact(
+  conversationId: string,
+  artifactId?: string,
+): Promise<DeployConversationResult> {
+  return json<DeployConversationResult>(
+    fetch(`/api/conversations/${conversationId}/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(artifactId ? { artifactId } : {}),
     }),
   )
 }
