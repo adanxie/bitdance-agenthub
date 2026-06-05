@@ -21,6 +21,13 @@ import {
 } from './context-compaction-service'
 import { buildHistoryFor } from './conversation-context'
 import {
+  clearFileWrites,
+  detectWaveConflicts,
+  getFileWrites,
+  type FileWriteConflict,
+  type RunFileWrites,
+} from './dispatch-file-writes'
+import {
   collectDependencyClosure,
   compileDispatchPlan,
   parseDispatchPlanToolArgs,
@@ -343,7 +350,7 @@ async function executeOrchestratorRun(
   })
 
   // ─── Stage 2: EXECUTE (DAG) ────────────────────────────
-  const taskResults = await executeDag(plan, {
+  const { results: taskResults, conflicts: fileConflicts } = await executeDag(plan, {
     parentRunId: runId,
     conversationId: args.conversationId,
     triggerMessageId: args.triggerMessageId,
@@ -361,6 +368,8 @@ async function executeOrchestratorRun(
     userPrompt,
     plan,
     taskResults,
+    fileConflicts,
+    workspace,
   )
   // Aggregate 阶段不再带 plan_tasks 工具，避免重复拆解
   const aggregateToolNames = agent.toolNames.filter((n) => n !== 'plan_tasks')
@@ -400,9 +409,10 @@ interface DagContext {
 async function executeDag(
   plan: DispatchPlanItem[],
   ctx: DagContext,
-): Promise<Map<string, DispatchTaskResult>> {
+): Promise<{ results: Map<string, DispatchTaskResult>; conflicts: FileWriteConflict[] }> {
   const results = new Map<string, DispatchTaskResult>()
   const remaining = new Set(plan.map((t) => t.id))
+  const conflicts: FileWriteConflict[] = []
 
   while (remaining.size > 0) {
     if (ctx.signal.aborted) {
@@ -440,9 +450,30 @@ async function executeDag(
       results.set(ready[i].id, wave[i])
       remaining.delete(ready[i].id)
     }
+
+    // 同波次「代码冲突」检测：本波 ≥2 个子 run 经 fs_write 写了同一文件且内容不同
+    if (ready.length > 1) {
+      const runWrites: RunFileWrites[] = []
+      for (let i = 0; i < ready.length; i++) {
+        const childRunId = wave[i].runId
+        if (!childRunId) continue
+        runWrites.push({
+          taskId: ready[i].id,
+          agentId: ready[i].agentId,
+          runId: childRunId,
+          writes: getFileWrites(childRunId),
+        })
+      }
+      conflicts.push(...detectWaveConflicts(runWrites))
+    }
   }
 
-  return results
+  // 释放本次 dispatch 各子 run 的写入记录（内存）
+  for (const r of results.values()) {
+    if (r.runId) clearFileWrites(r.runId)
+  }
+
+  return { results, conflicts }
 }
 
 async function runChildTask(
@@ -1251,6 +1282,8 @@ async function buildAggregatePrompt(
   originalUserPrompt: string,
   plan: DispatchPlanItem[],
   taskResults: Map<string, DispatchTaskResult>,
+  conflicts: FileWriteConflict[],
+  workspace: WorkspaceRow,
 ): Promise<string> {
   const allArtifactIds = [...taskResults.values()].flatMap((r) => r.artifactIds)
   const artifacts =
@@ -1277,14 +1310,30 @@ async function buildAggregatePrompt(
     .filter(Boolean)
     .join('\n')
 
-  return [
+  const lines = [
     `<user_request>${originalUserPrompt}</user_request>`,
     '<task_results>',
     resultsXml,
     '</task_results>',
-    '',
-    '请基于以上结果给用户输出最终总结消息。',
-  ].join('\n')
+  ]
+
+  if (conflicts.length > 0) {
+    const cwd = getEffectiveCwd(workspace)
+    const toRel = (abs: string) =>
+      abs.startsWith(cwd) ? abs.slice(cwd.length).replace(/^[\\/]+/, '') : abs
+    lines.push(
+      '<file_conflicts>',
+      '  <!-- 多个并行子任务写了同一文件，后写已覆盖先写。请在总结里明确告知用户：哪个文件、涉及哪些任务、当前保留的是最后写入的版本，并建议如何处理（例如改为串行重做或人工合并）。 -->',
+      ...conflicts.map((c) => {
+        const tasks = c.contributors.map((w) => `${w.taskId}(${w.agentId})`).join(', ')
+        return `  <conflict path=${JSON.stringify(toRel(c.path))} tasks=${JSON.stringify(tasks)} />`
+      }),
+      '</file_conflicts>',
+    )
+  }
+
+  lines.push('', '请基于以上结果给用户输出最终总结消息。')
+  return lines.join('\n')
 }
 
 // ─── 杂项 ──────────────────────────────────────────────────

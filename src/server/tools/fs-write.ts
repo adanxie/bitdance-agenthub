@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
+import { recordFileWrite } from '@/server/dispatch-file-writes'
 import {
   getWorkspaceForConversation,
   readIfExists,
@@ -63,6 +64,7 @@ export const fsWriteTool: ToolDef = {
     if (mode === 'auto') {
       try {
         const result = writeFileInWorkspace(workspace, parsed.data.path, parsed.data.content)
+        recordFileWrite(ctx.runId, result.absolutePath, parsed.data.content)
         return { ok: true, value: { ...result, applied: 'auto' as const } }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -105,6 +107,8 @@ export const fsWriteTool: ToolDef = {
     if (!decision.applied) {
       return { ok: false, error: 'User rejected the file change' }
     }
+
+    recordFileWrite(ctx.runId, absPath, parsed.data.content)
 
     return {
       ok: true,
