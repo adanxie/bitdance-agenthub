@@ -4,7 +4,7 @@
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "node scripts/run-electron-node.mjs node_modules/next/dist/bin/next dev",
+    "dev": "node scripts/ensure-node-sqlite.mjs && node node_modules/next/dist/bin/next dev",
     "build": "node scripts/run-electron-node.mjs node_modules/next/dist/bin/next build",
     "start": "node scripts/run-electron-node.mjs node_modules/next/dist/bin/next start",
     "lint": "eslint",
