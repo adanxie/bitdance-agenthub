@@ -81,7 +81,7 @@ export const toolRegistry = buildRegistry()
 
 源文件：`src/server/tools/write-artifact.ts`
 
-**当前限制**：`type` 接受 `'web_app' | 'document' | 'image' | 'diff'`。`code_file` 不由 LLM 直接创建，避免把大文件内容塞进 DB 或绕过 workspace 文件写入路径。
+**当前限制**：`type` 接受 `'web_app' | 'document' | 'image' | 'ppt'`。`diff` 不再由 Agent 通过 `write_artifact` 创建；产物差异由前端版本对比从已存 artifact versions 确定性生成。`code_file` 不由 LLM 直接创建，避免把大文件内容塞进 DB 或绕过 workspace 文件写入路径。
 
 **入参容错（drift 增量）**：handler 会接受 4 种 `content` 形状并归一化到标准 `ArtifactContent`（见 Spec 04）：
 
@@ -91,8 +91,8 @@ export const toolRegistry = buildRegistry()
 | `{ html: '...', css?, js? }` | 扁平形态，映射到 `index.html` / `style.css` / `script.js` |
 | `{ content: '<html>...' }` 或 `{ code: '...' }` | 单文件 HTML，作为 `index.html` |
 | `'<html>...'` 裸字符串 | 同上 |
-| `{ targetArtifactId, hunks }` | `diff` 标准形态，直接用 |
-| `{ targetArtifactId, diff }` 或 `{ targetArtifactId, patch }` | 解析 unified diff 字符串为 hunks |
+
+`document` 接受 `{ content }` / `{ markdown }` / `{ text }` / 裸字符串；`image` 接受 `{ url, alt? }` 或裸 URL 字符串；`ppt` 接受 `{ title?, theme?, slides }`。历史 `diff` 内容归一化逻辑仍保留在 `src/server/artifact-content.ts` 给旧数据兼容，但不在 `write_artifact` 的 zod schema、JSON Schema 或 LLM 描述中暴露。
 
 **返回值**：`{ artifactId, title, type }`。**不发布 `artifact.create` 事件**，由 Adapter 在 tool_result 后统一发，AgentRunner 接住后注入 `artifact_ref` part（见 Spec 02 的「artifact_ref 注入路径」）。
 

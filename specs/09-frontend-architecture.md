@@ -222,7 +222,7 @@ app/page.tsx
     │   │   └── 否则: <FileTab>            ── 文件浏览 / 编辑
     │   └── <PendingWriteApprovalDialog> 已废弃 —— 由 PendingWritesPanel + PendingWriteDiffTab 取代
     ├── <FileExplorerPanel />     ── 右侧文件树（与 ArtifactPreviewPanel 互斥）
-    └── <ArtifactPreviewPanel />  ── 右侧产物预览（按 type 分发：web_app/document/image/code_file/diff）
+    └── <ArtifactPreviewPanel />  ── 右侧产物预览（按 type 分发；多版本支持确定性对比，历史 diff 只读兼容）
 
 <StreamProvider>                  ── 顶层 layout，全局 SSE 接入
 <ThemeProvider>                   ── next-themes

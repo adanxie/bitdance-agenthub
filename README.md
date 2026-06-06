@@ -49,7 +49,7 @@ Claude Code Agent 通过 SDK MCP server 同样可以用这套工具。
 
 ### 产物预览与编辑
 - 内联卡片 + 全屏预览面板
-- web_app：iframe sandbox + 源码切换；document：Markdown 渲染；image / diff 双栏 / code_file（workspace 文件）
+- web_app：iframe sandbox + 源码切换；document：Markdown 渲染；image / 版本对比 diff（历史 diff 只读）/ code_file（workspace 文件）
 - **ppt：幻灯片分页预览（背景/主色/字体按设计 theme token 渲染）+ 一键导出真 .pptx**（pptxgenjs，Office 可打开）
 - 版本历史链（parentArtifactId）+ 一键 v1↔v2 切换
 - 选中文字 → 浮动「让 Agent 改这段」按钮 → 引用块自动注入
