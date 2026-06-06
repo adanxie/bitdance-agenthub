@@ -1,7 +1,6 @@
 'use client'
 
-import { Search } from 'lucide-react'
-import { useEffect } from 'react'
+import { TextSearch } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useSearchStore } from '@/stores/search-store'
@@ -9,30 +8,17 @@ import { useSearchStore } from '@/stores/search-store'
 export function GlobalSearchTrigger() {
   const openSearch = useSearchStore((s) => s.openSearch)
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      // ⌘K on Mac, Ctrl+K on other platforms
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        openSearch()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [openSearch])
-
   return (
     <Button
       type="button"
       variant="outline"
-      size="sm"
+      size="icon"
       onClick={openSearch}
-      className="gap-2"
-      aria-label="Search messages"
+      title="搜索消息内容 (⌘K)"
+      aria-label="搜索消息内容"
+      className="size-8 shrink-0"
     >
-      <Search className="h-4 w-4" />
-      <span className="hidden md:inline">Search</span>
-      <kbd className="ml-2 hidden rounded border bg-muted px-1 text-xs md:inline">⌘K</kbd>
+      <TextSearch className="size-4" />
     </Button>
   )
 }
