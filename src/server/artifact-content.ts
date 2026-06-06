@@ -393,11 +393,29 @@ function normalisePptLayout(value: unknown): PptLayout | null {
 function normalisePptTheme(value: unknown): PptTheme | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const obj = value as Record<string, unknown>
-  const primaryColor = readString(obj.primaryColor)?.replace(/^#/, '')
-  const fontFace = readString(obj.fontFace) ?? undefined
-  if (!primaryColor && !fontFace) return undefined
-  return {
-    ...(primaryColor ? { primaryColor } : {}),
-    ...(fontFace ? { fontFace } : {}),
-  }
+  const hexColor = (v: unknown) => readString(v)?.replace(/^#/, '') ?? undefined
+  const theme: PptTheme = {}
+  const primary = hexColor(obj.primary) ?? hexColor(obj.primaryColor) ?? hexColor(obj.color)
+  if (primary) theme.primary = primary
+  const background = hexColor(obj.background) ?? hexColor(obj.bg)
+  if (background) theme.background = background
+  const surface = hexColor(obj.surface) ?? hexColor(obj.card)
+  if (surface) theme.surface = surface
+  const textBody = hexColor(obj.textBody) ?? hexColor(obj.text) ?? hexColor(obj.bodyColor)
+  if (textBody) theme.textBody = textBody
+  const textMuted = hexColor(obj.textMuted) ?? hexColor(obj.muted)
+  if (textMuted) theme.textMuted = textMuted
+  const accentPositive = hexColor(obj.accentPositive) ?? hexColor(obj.positive) ?? hexColor(obj.success)
+  if (accentPositive) theme.accentPositive = accentPositive
+  const accentNegative =
+    hexColor(obj.accentNegative) ?? hexColor(obj.negative) ?? hexColor(obj.danger) ?? hexColor(obj.warning)
+  if (accentNegative) theme.accentNegative = accentNegative
+  const divider = hexColor(obj.divider) ?? hexColor(obj.border)
+  if (divider) theme.divider = divider
+  const fontHeading =
+    readString(obj.fontHeading) ?? readString(obj.headingFont) ?? readString(obj.fontFace) ?? readString(obj.font)
+  if (fontHeading) theme.fontHeading = fontHeading
+  const fontBody = readString(obj.fontBody) ?? readString(obj.bodyFont) ?? readString(obj.font)
+  if (fontBody) theme.fontBody = fontBody
+  return Object.keys(theme).length > 0 ? theme : undefined
 }

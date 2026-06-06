@@ -16,7 +16,8 @@ import { createArtifactVersion, fetchArtifactVersions, workspaceReadFile, worksp
 import { artifactPreviewPath } from '@/lib/artifact-preview'
 import { normalizeLang } from '@/lib/highlighter'
 import { cn } from '@/lib/utils'
-import type { ArtifactContent, DiffHunk, PptSlide } from '@/shared/types'
+import { resolvePptTheme } from '@/shared/ppt-theme'
+import type { ArtifactContent, DiffHunk, PptSlide, PptTheme } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
 // 编辑器仅在用户点「编辑」时懒加载（重型 client 库；CodeMirror 无 worker、离线 OK）
@@ -537,7 +538,7 @@ function SlideDeckView({
         {view === 'render' ? (
           <div ref={containerRef} className="size-full bg-zinc-100 dark:bg-zinc-900">
             {current ? (
-              <SlideView slide={current} deckTitle={content.title} />
+              <SlideView slide={current} deckTitle={content.title} theme={content.theme} />
             ) : (
               <Empty>没有幻灯片</Empty>
             )}
@@ -562,32 +563,89 @@ function SlideDeckView({
   )
 }
 
-function SlideView({ slide, deckTitle }: { slide: PptSlide; deckTitle?: string }) {
+function SlideView({
+  slide,
+  deckTitle,
+  theme,
+}: {
+  slide: PptSlide
+  deckTitle?: string
+  theme?: PptTheme
+}) {
+  const t = resolvePptTheme(theme)
   const layout = slide.layout ?? 'title-bullets'
   const centered = layout === 'title' || layout === 'section'
   const heading = slide.title ?? (centered ? deckTitle : undefined)
+  const hx = (c: string) => `#${c}`
+
   return (
-    <div className="flex size-full items-center justify-center p-6">
-      <div className="aspect-video w-full max-w-3xl overflow-hidden rounded-lg border bg-card shadow-sm">
-        <div
-          className={cn(
-            'flex size-full flex-col gap-4 overflow-auto p-10',
-            centered && 'items-center justify-center text-center',
-          )}
-        >
-          {heading && (
-            <h2 className={cn('font-semibold text-foreground', centered ? 'text-3xl' : 'text-2xl')}>
-              {heading}
-            </h2>
-          )}
-          {!centered && slide.bullets && slide.bullets.length > 0 && (
-            <ul className="list-disc space-y-2 pl-6 text-base leading-relaxed text-foreground/90">
-              {slide.bullets.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+    <div
+      className="flex size-full items-center justify-center p-6"
+      style={{ background: hx(t.background) }}
+    >
+      <div
+        className="aspect-video w-full max-w-3xl overflow-hidden rounded-lg shadow-md"
+        style={{
+          border: `1px solid ${hx(t.divider)}`,
+          fontFamily: `${t.fontBody}, system-ui, sans-serif`,
+        }}
+      >
+        {centered ? (
+          <div
+            className="flex size-full flex-col items-center justify-center gap-5 p-12 text-center"
+            style={{ background: hx(t.primary) }}
+          >
+            {heading && (
+              <h2
+                className="text-3xl font-bold leading-tight"
+                style={{ color: '#FFFFFF', fontFamily: `${t.fontHeading}, system-ui, sans-serif` }}
+              >
+                {heading}
+              </h2>
+            )}
+            {slide.bullets && slide.bullets.length > 0 && (
+              <div className="space-y-1 text-sm" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                {slide.bullets.map((b, i) => (
+                  <div key={i}>{b}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex size-full flex-col" style={{ background: hx(t.surface) }}>
+            <div className="h-1.5 shrink-0" style={{ background: hx(t.primary) }} />
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-10">
+              {heading && (
+                <h2
+                  className="border-b pb-3 text-2xl font-bold"
+                  style={{
+                    color: hx(t.primary),
+                    borderColor: hx(t.divider),
+                    fontFamily: `${t.fontHeading}, system-ui, sans-serif`,
+                  }}
+                >
+                  {heading}
+                </h2>
+              )}
+              {slide.bullets && slide.bullets.length > 0 && (
+                <ul className="space-y-2.5">
+                  {slide.bullets.map((b, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-2.5 text-[15px] leading-relaxed"
+                      style={{ color: hx(t.textBody) }}
+                    >
+                      <span className="mt-0.5 select-none" style={{ color: hx(t.primary) }}>
+                        ▪
+                      </span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

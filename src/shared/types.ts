@@ -84,8 +84,19 @@ export interface PptSlide {
   layout?: PptLayout
 }
 
+/** 幻灯片视觉 token；颜色为不带 # 的 hex（如 '1A3C6E'）。全部可选，渲染时经 resolvePptTheme 填默认值。 */
 export interface PptTheme {
-  /** 不带 # 的 hex，如 '1E40AF' */
+  primary?: string // 主色：标题、强调、顶部色条
+  background?: string // 幻灯片背景（建议冷白，非纯白）
+  surface?: string // 卡片 / 容器背景
+  textBody?: string // 正文 / 要点
+  textMuted?: string // 副标题 / 页码 / 脚注
+  accentPositive?: string // 正面指标（增长 / 利润）
+  accentNegative?: string // 警示 / 风险
+  divider?: string // 分割线 / 边框
+  fontHeading?: string // 标题字体
+  fontBody?: string // 正文字体
+  /** @deprecated 旧字段，resolvePptTheme 兼容映射到 primary / fontHeading+fontBody */
   primaryColor?: string
   fontFace?: string
 }

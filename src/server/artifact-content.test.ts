@@ -233,7 +233,7 @@ describe('buildArtifactContent', () => {
     })
   })
 
-  it('ppt: 非法 layout 忽略 + theme 剥 #', () => {
+  it('ppt: 非法 layout 忽略 + theme 旧字段(primaryColor/fontFace)映射 + 剥 #', () => {
     expect(
       buildArtifactContent('ppt', {
         theme: { primaryColor: '#1E40AF', fontFace: 'Arial' },
@@ -241,8 +241,37 @@ describe('buildArtifactContent', () => {
       }),
     ).toEqual({
       type: 'ppt',
-      theme: { primaryColor: '1E40AF', fontFace: 'Arial' },
+      theme: { primary: '1E40AF', fontHeading: 'Arial' },
       slides: [{ title: 'A' }],
+    })
+  })
+
+  it('ppt: theme 完整 token + 别名(positive/danger/bg) 规整', () => {
+    expect(
+      buildArtifactContent('ppt', {
+        theme: {
+          primary: '#1A3C6E',
+          bg: '#F8F9FA',
+          textBody: '2C3E50',
+          positive: '2B7A4B',
+          danger: '#C0392B',
+          fontHeading: 'Inter',
+          fontBody: 'Inter',
+        },
+        slides: [{ title: 'A', bullets: ['x'] }],
+      }),
+    ).toEqual({
+      type: 'ppt',
+      theme: {
+        primary: '1A3C6E',
+        background: 'F8F9FA',
+        textBody: '2C3E50',
+        accentPositive: '2B7A4B',
+        accentNegative: 'C0392B',
+        fontHeading: 'Inter',
+        fontBody: 'Inter',
+      },
+      slides: [{ title: 'A', bullets: ['x'] }],
     })
   })
 
