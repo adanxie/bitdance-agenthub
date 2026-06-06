@@ -1,6 +1,33 @@
 'use client'
 
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react'
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileCog,
+  FileImage,
+  FileJson,
+  FileKey,
+  FileLock,
+  FileSpreadsheet,
+  FileTerminal,
+  FileText,
+  FileType,
+  FileVideo,
+  Folder,
+  FolderOpen,
+  Loader2,
+  Package,
+  Palette,
+  RefreshCw,
+  X,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -79,17 +106,13 @@ export function FileExplorerPanel() {
   )
 
   const toggleDir = (relPath: string) => {
-    setNodes((prev) => {
-      const cur = prev[relPath]
-      if (cur && cur.expanded) {
-        return { ...prev, [relPath]: { ...cur, expanded: false } }
-      }
-      return prev
-    })
-    if (!nodes[relPath] || !nodes[relPath].loaded) {
+    const cur = nodes[relPath]
+    if (cur?.expanded) {
+      // 已展开 → 收起（三种情况互斥，否则收起会被下面重新展开覆盖）
+      setNodes((prev) => ({ ...prev, [relPath]: { ...prev[relPath], expanded: false } }))
+    } else if (!cur || !cur.loaded) {
       void loadDir(relPath)
     } else {
-      // 重新展开
       setNodes((prev) => ({ ...prev, [relPath]: { ...prev[relPath], expanded: true } }))
     }
   }
@@ -231,6 +254,7 @@ function DirTreeNode({
                 </div>
               )
             }
+            const { Icon: FileIcon, cls } = getFileIcon(e.name)
             return (
               <button
                 key={childPath}
@@ -239,7 +263,7 @@ function DirTreeNode({
                 className="flex w-full items-center gap-1 px-3 py-1 text-left text-xs hover:bg-accent"
                 style={{ paddingLeft: 12 + indent * 14 + 14 }}
               >
-                <File className="size-3.5 shrink-0 text-muted-foreground" />
+                <FileIcon className={cn('size-3.5 shrink-0', cls)} />
                 <span className="truncate">{e.name}</span>
               </button>
             )
@@ -248,4 +272,152 @@ function DirTreeNode({
       )}
     </>
   )
+}
+
+type FileIconSpec = { Icon: LucideIcon; cls: string }
+
+// 扩展名（小写，含 .gitignore 这类点文件取到的 "gitignore"）→ 图标 + 颜色，VS Code 风格
+const EXT_ICON: Record<string, FileIconSpec> = {
+  // TypeScript / JavaScript
+  ts: { Icon: FileCode, cls: 'text-blue-500' },
+  tsx: { Icon: FileCode, cls: 'text-blue-500' },
+  mts: { Icon: FileCode, cls: 'text-blue-500' },
+  cts: { Icon: FileCode, cls: 'text-blue-500' },
+  js: { Icon: FileCode, cls: 'text-yellow-500' },
+  jsx: { Icon: FileCode, cls: 'text-yellow-500' },
+  mjs: { Icon: FileCode, cls: 'text-yellow-500' },
+  cjs: { Icon: FileCode, cls: 'text-yellow-500' },
+  // 数据 / 配置
+  json: { Icon: FileJson, cls: 'text-amber-500' },
+  jsonc: { Icon: FileJson, cls: 'text-amber-500' },
+  json5: { Icon: FileJson, cls: 'text-amber-500' },
+  yaml: { Icon: FileCog, cls: 'text-muted-foreground' },
+  yml: { Icon: FileCog, cls: 'text-muted-foreground' },
+  toml: { Icon: FileCog, cls: 'text-muted-foreground' },
+  ini: { Icon: FileCog, cls: 'text-muted-foreground' },
+  conf: { Icon: FileCog, cls: 'text-muted-foreground' },
+  cfg: { Icon: FileCog, cls: 'text-muted-foreground' },
+  env: { Icon: FileKey, cls: 'text-amber-500' },
+  editorconfig: { Icon: FileCog, cls: 'text-muted-foreground' },
+  prettierrc: { Icon: FileCog, cls: 'text-muted-foreground' },
+  eslintrc: { Icon: FileCog, cls: 'text-muted-foreground' },
+  npmrc: { Icon: FileCog, cls: 'text-muted-foreground' },
+  gitignore: { Icon: FileCode, cls: 'text-orange-500' },
+  gitattributes: { Icon: FileCode, cls: 'text-orange-500' },
+  // 文档
+  md: { Icon: FileText, cls: 'text-sky-400' },
+  mdx: { Icon: FileText, cls: 'text-sky-400' },
+  markdown: { Icon: FileText, cls: 'text-sky-400' },
+  txt: { Icon: FileText, cls: 'text-muted-foreground' },
+  log: { Icon: FileText, cls: 'text-muted-foreground' },
+  pdf: { Icon: FileText, cls: 'text-red-500' },
+  doc: { Icon: FileText, cls: 'text-blue-600' },
+  docx: { Icon: FileText, cls: 'text-blue-600' },
+  rtf: { Icon: FileText, cls: 'text-muted-foreground' },
+  // 标记 / 样式
+  html: { Icon: FileCode, cls: 'text-orange-500' },
+  htm: { Icon: FileCode, cls: 'text-orange-500' },
+  xml: { Icon: FileCode, cls: 'text-orange-400' },
+  css: { Icon: Palette, cls: 'text-sky-500' },
+  scss: { Icon: Palette, cls: 'text-pink-500' },
+  sass: { Icon: Palette, cls: 'text-pink-500' },
+  less: { Icon: Palette, cls: 'text-blue-500' },
+  vue: { Icon: FileCode, cls: 'text-emerald-500' },
+  svelte: { Icon: FileCode, cls: 'text-orange-600' },
+  astro: { Icon: FileCode, cls: 'text-orange-500' },
+  // 编程语言
+  py: { Icon: FileCode, cls: 'text-sky-500' },
+  rb: { Icon: FileCode, cls: 'text-red-500' },
+  go: { Icon: FileCode, cls: 'text-cyan-500' },
+  rs: { Icon: FileCode, cls: 'text-orange-600' },
+  java: { Icon: FileCode, cls: 'text-red-600' },
+  kt: { Icon: FileCode, cls: 'text-purple-500' },
+  c: { Icon: FileCode, cls: 'text-blue-600' },
+  h: { Icon: FileCode, cls: 'text-blue-600' },
+  cpp: { Icon: FileCode, cls: 'text-blue-600' },
+  cc: { Icon: FileCode, cls: 'text-blue-600' },
+  hpp: { Icon: FileCode, cls: 'text-blue-600' },
+  cs: { Icon: FileCode, cls: 'text-violet-500' },
+  php: { Icon: FileCode, cls: 'text-indigo-500' },
+  swift: { Icon: FileCode, cls: 'text-orange-500' },
+  sql: { Icon: Database, cls: 'text-sky-600' },
+  // Shell
+  sh: { Icon: FileTerminal, cls: 'text-green-500' },
+  bash: { Icon: FileTerminal, cls: 'text-green-500' },
+  zsh: { Icon: FileTerminal, cls: 'text-green-500' },
+  fish: { Icon: FileTerminal, cls: 'text-green-500' },
+  ps1: { Icon: FileTerminal, cls: 'text-blue-400' },
+  // 图片
+  png: { Icon: FileImage, cls: 'text-purple-500' },
+  jpg: { Icon: FileImage, cls: 'text-purple-500' },
+  jpeg: { Icon: FileImage, cls: 'text-purple-500' },
+  gif: { Icon: FileImage, cls: 'text-purple-500' },
+  webp: { Icon: FileImage, cls: 'text-purple-500' },
+  bmp: { Icon: FileImage, cls: 'text-purple-500' },
+  ico: { Icon: FileImage, cls: 'text-purple-500' },
+  avif: { Icon: FileImage, cls: 'text-purple-500' },
+  svg: { Icon: FileImage, cls: 'text-pink-500' },
+  // 音视频
+  mp4: { Icon: FileVideo, cls: 'text-rose-500' },
+  mov: { Icon: FileVideo, cls: 'text-rose-500' },
+  avi: { Icon: FileVideo, cls: 'text-rose-500' },
+  mkv: { Icon: FileVideo, cls: 'text-rose-500' },
+  webm: { Icon: FileVideo, cls: 'text-rose-500' },
+  mp3: { Icon: FileAudio, cls: 'text-amber-600' },
+  wav: { Icon: FileAudio, cls: 'text-amber-600' },
+  flac: { Icon: FileAudio, cls: 'text-amber-600' },
+  ogg: { Icon: FileAudio, cls: 'text-amber-600' },
+  m4a: { Icon: FileAudio, cls: 'text-amber-600' },
+  // 压缩包
+  zip: { Icon: FileArchive, cls: 'text-yellow-600' },
+  tar: { Icon: FileArchive, cls: 'text-yellow-600' },
+  gz: { Icon: FileArchive, cls: 'text-yellow-600' },
+  tgz: { Icon: FileArchive, cls: 'text-yellow-600' },
+  rar: { Icon: FileArchive, cls: 'text-yellow-600' },
+  '7z': { Icon: FileArchive, cls: 'text-yellow-600' },
+  bz2: { Icon: FileArchive, cls: 'text-yellow-600' },
+  xz: { Icon: FileArchive, cls: 'text-yellow-600' },
+  // 表格
+  csv: { Icon: FileSpreadsheet, cls: 'text-green-600' },
+  tsv: { Icon: FileSpreadsheet, cls: 'text-green-600' },
+  xls: { Icon: FileSpreadsheet, cls: 'text-green-600' },
+  xlsx: { Icon: FileSpreadsheet, cls: 'text-green-600' },
+  // 字体
+  ttf: { Icon: FileType, cls: 'text-pink-400' },
+  otf: { Icon: FileType, cls: 'text-pink-400' },
+  woff: { Icon: FileType, cls: 'text-pink-400' },
+  woff2: { Icon: FileType, cls: 'text-pink-400' },
+  // 证书 / 密钥
+  pem: { Icon: FileKey, cls: 'text-amber-500' },
+  key: { Icon: FileKey, cls: 'text-amber-500' },
+  crt: { Icon: FileKey, cls: 'text-amber-500' },
+  cert: { Icon: FileKey, cls: 'text-amber-500' },
+  // 锁文件扩展名
+  lock: { Icon: FileLock, cls: 'text-muted-foreground' },
+}
+
+// 完整文件名（小写）→ 图标，优先级高于扩展名
+const NAME_ICON: Record<string, FileIconSpec> = {
+  'package.json': { Icon: Package, cls: 'text-red-400' },
+  'package-lock.json': { Icon: FileLock, cls: 'text-muted-foreground' },
+  'pnpm-lock.yaml': { Icon: FileLock, cls: 'text-muted-foreground' },
+  'yarn.lock': { Icon: FileLock, cls: 'text-muted-foreground' },
+  'bun.lockb': { Icon: FileLock, cls: 'text-muted-foreground' },
+  'cargo.lock': { Icon: FileLock, cls: 'text-muted-foreground' },
+  'tsconfig.json': { Icon: FileCog, cls: 'text-blue-500' },
+  dockerfile: { Icon: FileCode, cls: 'text-sky-500' },
+  makefile: { Icon: FileCog, cls: 'text-muted-foreground' },
+}
+
+const DEFAULT_FILE_ICON: FileIconSpec = { Icon: File, cls: 'text-muted-foreground' }
+
+// 根据文件名挑选图标：完整文件名 > 特例前缀 > 扩展名 > 默认
+function getFileIcon(name: string): FileIconSpec {
+  const lower = name.toLowerCase()
+  if (NAME_ICON[lower]) return NAME_ICON[lower]
+  if (lower.startsWith('readme')) return { Icon: BookOpen, cls: 'text-sky-500' }
+  if (lower.startsWith('.env')) return { Icon: FileKey, cls: 'text-amber-500' }
+  if (lower.startsWith('license') || lower.startsWith('licence')) return { Icon: FileText, cls: 'text-amber-500' }
+  const ext = lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : ''
+  return EXT_ICON[ext] ?? DEFAULT_FILE_ICON
 }
