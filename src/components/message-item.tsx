@@ -57,7 +57,7 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
   const upsertMessage = useAppStore((s) => s.upsertMessage)
 
   const isUser = message.role === 'user'
-  const name = isUser ? '我' : agent?.name ?? 'Unknown'
+  const name = isUser ? '我' : message.role === 'system' ? '系统' : agent?.name ?? 'Unknown'
   const isLatestUser = isUser && latestUserId === message.id
   const isLatestAgent = !isUser && latestAgentId === message.id
 
@@ -181,7 +181,9 @@ function MessageItemImpl({ message }: { message: MessageRow }) {
         />
       ) : (
         <Avatar className="size-8 shrink-0">
-          <AvatarFallback className="text-sm">?</AvatarFallback>
+          <AvatarFallback className="text-sm">
+            {message.role === 'system' ? '系' : '?'}
+          </AvatarFallback>
         </Avatar>
       )}
 
