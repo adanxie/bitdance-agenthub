@@ -130,7 +130,7 @@ export function FileExplorerPanel() {
     setNodes({})
     setLoadingRoot(true)
     void loadDir('').finally(() => setLoadingRoot(false))
-  }, [open, conv?.id, loadDir])
+  }, [open, conv, loadDir])
 
   if (!open || !conv) return null
 

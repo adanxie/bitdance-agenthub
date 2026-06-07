@@ -62,11 +62,8 @@ export function DirPickerDialog({
   }, [])
 
   // 打开时初始化（家目录，由后端默认）；关闭时不清理（下次打开继承）。
-  // navigate 内部会 setState，触发 react-hooks/set-state-in-effect；这是 dialog 唯一
-  // 的初始化时机，没更干净的替代写法，禁用规则。
   useEffect(() => {
     if (open && !currentPath) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       void navigate()
     }
   }, [open, currentPath, navigate])

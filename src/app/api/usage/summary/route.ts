@@ -1,4 +1,4 @@
-import { and, desc, gte, inArray, isNotNull } from 'drizzle-orm'
+import { inArray, isNotNull } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 
 import { db, schema } from '@/db/client'

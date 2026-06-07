@@ -1,7 +1,7 @@
 'use client'
 
 import { AlertTriangle, FilePenLine, FolderOpen, FolderTree, Layers, Menu, MessagesSquare, UserPlus, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { AddAgentDialog } from '@/components/add-agent-dialog'
 import { AgentInfoPopover } from '@/components/agent-info-popover'
@@ -44,7 +44,10 @@ export function ChatPanel() {
   const openFiles = useOpenFiles(conv?.id ?? '')
   const activeTab = useActiveTab(conv?.id ?? '')
   const pendingWrites = usePendingWrites(conv?.id ?? null)
-  const pendingById = new Map(pendingWrites.map((p) => [p.id, p]))
+  const pendingById = useMemo(
+    () => new Map(pendingWrites.map((p) => [p.id, p])),
+    [pendingWrites],
+  )
 
   // Pending 被 resolve（其他客户端 / SSE 移除）后，关闭对应的 diff tab —— 即使该 tab 当前在后台
   useEffect(() => {
