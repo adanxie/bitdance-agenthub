@@ -114,79 +114,25 @@ Sidebar 顶部齿轮 → 「API 设置」，填 Anthropic / OpenAI / DeepSeek / 
 
 ## 🏗 架构概览
 
-```
-┌─ L5 UI 组件（React / shadcn）
-│
-├─ L4 State + Transport
-│  ├─ Zustand store（normalized entities + 关系桶）
-│  └─ SSE 单连接（/api/stream，全局事件流）
-│
-├─ L3 Application Services
-│  ├─ AgentRunner（per-run 生命周期）
-│  ├─ ConversationService / ToolExecutor
-│  ├─ EventBus（HMR-safe globalThis 单例）
-│  └─ PendingWrites / PendingQuestions 等中转 store
-│
-├─ L2 Agent Platform Adapters
-│  ├─ ClaudeCodeAdapter（SDK query() + canUseTool 桥 + MCP 工具）
-│  ├─ CodexAdapter（SDK runStreamed() + read-only/workspace-write 沙箱）
-│  ├─ CustomAgentAdapter（OpenAI 协议 stream + 自驱 tool loop）
-│  └─ MockAdapter
-│
-└─ L1 Persistence
-   ├─ Drizzle ORM + better-sqlite3
-   └─ Workspace 文件系统
-```
+五层分层：**L5 UI（React / shadcn）· L4 State+Transport（Zustand + 单条 SSE）· L3 服务（AgentRunner / ConversationService / EventBus）· L2 适配器（ClaudeCode / Codex / Custom / Mock）· L1 持久化（Drizzle + SQLite + workspace 文件系统）**。所有 Adapter / 工具产生的事件都走统一的 `StreamEvent` 联合类型粘合（→ 持久化 → SSE → 前端 reducer）。
 
-事件粘合：所有 Adapter / 工具产生的事件都走 **`StreamEvent` 联合类型** → AgentRunner 持久化 → EventBus 推 SSE → 前端 reducer 应用。详见 `specs/02-stream-events.md`。
+> 分层原则见 `CLAUDE.md §3`，逐层代码地图见 `OVERVIEW.md`，事件协议见 `specs/02-stream-events.md`。
 
 ---
 
 ## 📐 技术栈
 
-| 层 | 选型 |
-|---|---|
-| 前端 | Next.js 16 App Router + React 19 + TypeScript strict |
-| 样式 | Tailwind CSS v4 + shadcn/ui（base-ui） |
-| 状态 | Zustand + Immer + `useShallow` |
-| ORM | Drizzle |
-| DB | SQLite (`better-sqlite3`) |
-| 流式 | SSE（一条全局连接，event-bus 单例） |
-| LLM SDK | `@anthropic-ai/claude-agent-sdk`、`@anthropic-ai/sdk`、`openai`、`@openai/codex-sdk` |
-| 代码高亮 | `shiki`（双主题）+ `react-diff-viewer-continued`（diff 审批） |
-| 包管理 | pnpm |
+Next.js 16 App Router + React 19 + TypeScript(strict) · Tailwind v4 + shadcn/ui · Zustand + Immer · Drizzle + SQLite(`better-sqlite3`) · SSE 单连接 · LLM SDK(`@anthropic-ai/claude-agent-sdk` / `@anthropic-ai/sdk` / `openai` / `@openai/codex-sdk`) · pnpm。
+
+> 完整、已锁定的选型（含「不选什么 / 为什么」）见 `CLAUDE.md §2`。
 
 ---
 
 ## 📚 项目规格
 
-OpenSpec 契约在 `openspec/`：
-
-| 路径 | 内容 |
-|---|---|
-| `openspec/project.md` | 项目上下文、技术栈、OpenSpec 与旧 specs 的映射 |
-| `openspec/specs/*/spec.md` | 按 capability 拆分的 SHALL/MUST + Scenario 可校验规格 |
-
-编号版详细规格保留在 `specs/`：
-
-| Spec | 内容 |
-|---|---|
-| `01-core-entities.md` | 7 个核心实体字段定义（Agent / Conversation / Message / Artifact / Workspace / Tool / AgentRun） |
-| `02-stream-events.md` | StreamEvent 完整事件类型 + 持久化策略 |
-| `03-message-parts.md` | MessagePart 各类型详解 |
-| `04-artifacts.md` | Artifact 类型与渲染契约 |
-| `05-adapter-interface.md` | AgentPlatformAdapter 接口 + 各 adapter 实现要点 |
-| `06-orchestrator-flow.md` | Orchestrator 三阶段工作流 |
-| `07-tools.md` | 内置工具清单与签名 |
-| `08-db-schema.md` | Drizzle schema 与索引（含 app_settings 全局 key 表） |
-| `09-frontend-architecture.md` | 前端状态结构与事件应用 |
-| `10-agent-builder.md` | 自建 Agent 流程 |
-| `11-platform.md` | 平台抽象（POSIX / Windows shell、命令黑名单、路径校验、子进程清理） |
-| `12-desktop-electron.md` | 桌面版（Electron 打包 DMG / EXE） |
-| `13-conversation-context.md` | 跨 run 对话历史序列化、pinned 注入、context compact |
-| `14-mobile-remote.md` | 移动端伴随 App（Capacitor / Tailscale / 远程审批） |
-
-AI 协作约定见 `CLAUDE.md`。
+- **OpenSpec 能力契约**：`openspec/`（`project.md` + 按 capability 拆分的 `specs/*/spec.md`，SHALL/MUST + Scenario 可校验）。
+- **编号版详细规格**：`specs/`（核心实体 / StreamEvent / MessagePart / Artifact / Adapter / Orchestrator / 工具 / DB schema / 前端 / Electron / 移动端 …）—— 完整索引见 `CLAUDE.md §8`。
+- **AI 协作约定**：`CLAUDE.md`。
 
 ---
 
@@ -210,14 +156,13 @@ DB 文件位于 `.agenthub-data/agenthub.db`。Workspace 默认在 `.agenthub-da
 
 ---
 
-## 🎯 已知限制 / 待办
+## 🎯 已知限制
 
-- [ ] Codex Review 模式 diff 审批桥（当前 Review 以 read-only 运行；Auto 才允许 workspace-write）
-- [ ] CodexAdapter 暂不支持 DeepSeek 等 Chat Completions-only endpoint（DeepSeek 没有 `/responses`，请走 CustomAgentAdapter）
-- [ ] sandbox 模式的总量配额对 Claude Code SDK 失效（SDK 自己写盘绕过我们的 quota）
-- [ ] 移动端伴随 App（Capacitor 客户端 + Tailscale/LAN 配对通信，详见 Spec 14）
-- [x] Playwright E2E 基建 + 核心 IM 流（mock agent，`pnpm e2e`）；**待补**：产物/群聊调度 E2E（需测试假 adapter）
-- [ ] Orchestrator 冲突检测盲区：bash / SDK adapter 的写盘不经 `fs_write`，当前不追踪
+- CodexAdapter 只接 Codex/Responses 兼容 endpoint；DeepSeek 等 Chat Completions-only（没有 `/responses`）请走 CustomAgentAdapter。
+- sandbox 模式的目录配额对 Claude Code SDK 不生效（SDK 自行写盘绕过配额）。
+- Orchestrator 冲突检测盲区：bash / SDK adapter 不经 `fs_write` 的写盘不被追踪。
+
+> 完整开发待办见 `OVERVIEW.md`「📋 待办」。
 
 ---
 
