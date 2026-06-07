@@ -1,12 +1,11 @@
 'use client'
 
-import { AlertCircle, ChevronLeft, ChevronRight, Clock, Code, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 
-import { CodeBlock } from '@/components/code-block'
 import { buildDiffStyles } from '@/components/diff-viewer-styles'
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
@@ -301,7 +300,7 @@ function WebAppView({
   content: Extract<ArtifactContent, { type: 'web_app' }>
   onSaveVersion: SaveVersionFn
 }) {
-  const [view, setView] = useState<'render' | 'source' | 'edit'>('render')
+  const [view, setView] = useState<'render' | 'edit'>('render')
   const [activeFile, setActiveFile] = useState<string>(content.entry)
   const [draftFiles, setDraftFiles] = useState<Record<string, string>>(content.files)
   const [saving, setSaving] = useState(false)
@@ -335,7 +334,7 @@ function WebAppView({
     }
   }
 
-  const showFilePicker = (view === 'source' || view === 'edit') && fileNames.length > 1
+  const showFilePicker = view === 'edit' && fileNames.length > 1
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -344,10 +343,6 @@ function WebAppView({
           <ViewTab active={view === 'render'} onClick={() => setView('render')}>
             <Eye className="size-3.5" />
             预览
-          </ViewTab>
-          <ViewTab active={view === 'source'} onClick={() => setView('source')}>
-            <Code className="size-3.5" />
-            源码
           </ViewTab>
           <ViewTab active={view === 'edit'} onClick={() => setView('edit')}>
             <Pencil className="size-3.5" />
@@ -378,13 +373,6 @@ function WebAppView({
             className="size-full border-0 bg-white"
             title="Artifact preview"
           />
-        )}
-        {view === 'source' && (
-          <ScrollArea className="size-full">
-            <pre className="overflow-x-auto p-4 text-xs leading-relaxed">
-              <code>{content.files[activeFile] ?? ''}</code>
-            </pre>
-          </ScrollArea>
         )}
         {view === 'edit' && (
           <ArtifactCodeEditor
@@ -736,7 +724,7 @@ function CodeFileView({
   content: Extract<ArtifactContent, { type: 'code_file' }>
   onSaveVersion: SaveVersionFn
 }) {
-  const [view, setView] = useState<'source' | 'edit'>('source')
+  const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [fileContent, setFileContent] = useState('')
@@ -763,7 +751,6 @@ function CodeFileView({
   }, [conversationId, content.workspacePath])
 
   useEffect(() => {
-    setView('source')
     void reload()
   }, [artifactId, reload])
 
@@ -786,6 +773,16 @@ function CodeFileView({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setSaving(false)
+    }
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(draft)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // 剪贴板不可用时静默忽略
     }
   }
 
@@ -814,22 +811,6 @@ function CodeFileView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-between border-b px-2">
-        <div className="flex">
-          <ViewTab active={view === 'source'} onClick={() => setView('source')}>
-            <Eye className="size-3.5" />
-            源码
-          </ViewTab>
-          <ViewTab active={view === 'edit'} onClick={() => setView('edit')}>
-            <Pencil className="size-3.5" />
-            编辑
-          </ViewTab>
-        </div>
-        <Button size="icon" variant="ghost" onClick={() => void reload()} title="重新加载">
-          <RefreshCw className="size-4" />
-        </Button>
-      </div>
-
       <div className="flex shrink-0 items-center gap-2 border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground">
         <code className="min-w-0 flex-1 truncate font-mono">{content.workspacePath}</code>
         <span className="font-mono text-[10px]">{language}</span>
@@ -839,38 +820,44 @@ function CodeFileView({
             已截断
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          title="复制代码"
+          className="rounded p-1 transition-colors hover:text-foreground"
+        >
+          {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => void reload()}
+          title="重新加载"
+          className="rounded p-1 transition-colors hover:text-foreground"
+        >
+          <RefreshCw className="size-3.5" />
+        </button>
       </div>
 
       <div className="min-h-0 flex-1">
-        {view === 'source' ? (
-          <ScrollArea className="size-full">
-            <div className="px-3 py-3">
-              <CodeBlock code={fileContent} language={language} />
-            </div>
-          </ScrollArea>
-        ) : (
-          <ArtifactCodeEditor
-            value={draft}
-            onChange={setDraft}
-            filename={content.workspacePath}
-            type="code_file"
-            readOnly={truncated}
-          />
-        )}
+        <ArtifactCodeEditor
+          value={draft}
+          onChange={setDraft}
+          filename={content.workspacePath}
+          type="code_file"
+          readOnly={truncated}
+        />
       </div>
 
-      {view === 'edit' && (
-        <EditFooter
-          dirty={dirty && !truncated}
-          saving={saving}
-          error={error}
-          onSave={save}
-          onReset={() => {
-            setDraft(fileContent)
-            setError(null)
-          }}
-        />
-      )}
+      <EditFooter
+        dirty={dirty && !truncated}
+        saving={saving}
+        error={error}
+        onSave={save}
+        onReset={() => {
+          setDraft(fileContent)
+          setError(null)
+        }}
+      />
     </div>
   )
 }
