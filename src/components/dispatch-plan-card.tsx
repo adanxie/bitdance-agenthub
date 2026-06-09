@@ -2,6 +2,8 @@
 
 import { Ban, Check, CheckCircle2, Circle, Loader2, Network, X, XCircle } from 'lucide-react'
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Button } from '@/components/ui/button'
@@ -176,7 +178,7 @@ function PlanTaskList({ dispatch }: { dispatch: DispatchState }) {
                 )}
                 {status === 'running' && <TypingDots />}
               </div>
-              <div className="mt-0.5 line-clamp-2 text-muted-foreground">{task.task}</div>
+              <PlanTaskMarkdown>{task.task}</PlanTaskMarkdown>
               {(inputRefs.length > 0 || outputRefs.length > 0 || criteriaCount > 0) && (
                 <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
                   {inputRefs.length > 0 && (
@@ -200,6 +202,44 @@ function PlanTaskList({ dispatch }: { dispatch: DispatchState }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function PlanTaskMarkdown({ children }: { children: string }) {
+  return (
+    <div className="mt-0.5 line-clamp-2 text-muted-foreground">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children: node }) => <span>{node}</span>,
+          strong: ({ children: node }) => (
+            <strong className="font-semibold text-foreground/90">{node}</strong>
+          ),
+          em: ({ children: node }) => <em className="italic">{node}</em>,
+          code: ({ children: node }) => (
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-foreground/80">
+              {node}
+            </code>
+          ),
+          a: ({ href, children: node }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              {node}
+            </a>
+          ),
+          ul: ({ children: node }) => <span>{node}</span>,
+          ol: ({ children: node }) => <span>{node}</span>,
+          li: ({ children: node }) => <span>{node} </span>,
+          br: () => <span> </span>,
+        }}
+      >
+        {children}
+      </ReactMarkdown>
     </div>
   )
 }
