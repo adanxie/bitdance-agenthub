@@ -45,3 +45,8 @@ The packaging flow MUST carry Codex optional platform runtime dependencies neede
 #### Scenario: User runs Codex agent from packaged app
 - **WHEN** CodexAdapter starts a thread
 - **THEN** the SDK can locate its platform Codex binary dependency.
+
+#### Scenario: Electron prebuild deduplicates traced Codex runtime
+- **WHEN** `scripts/electron-prebuild.mjs` finds both the top-level Codex platform alias package and the matching traced `.pnpm/@openai+codex@...-<platform>` store package
+- **THEN** the top-level alias package remains available
+- **AND** the duplicate traced store package is removed before Electron packaging.

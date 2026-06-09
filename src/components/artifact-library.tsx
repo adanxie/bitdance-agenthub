@@ -24,7 +24,13 @@ import { useAppStore } from '@/stores/app-store'
  * 数据源是 /api/artifacts（轻量 meta），点击某项时按需 fetch 完整 content
  * 然后调用 openArtifactPreview 触发右侧预览。
  */
-export function ArtifactLibrary() {
+export function ArtifactLibrary({
+  conversationId,
+  showConversationTitle = true,
+}: {
+  conversationId?: string
+  showConversationTitle?: boolean
+}) {
   const [items, setItems] = useState<ArtifactListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -54,12 +60,13 @@ export function ArtifactLibrary() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return items
-    return items.filter((a) => {
+    const scoped = conversationId ? items.filter((a) => a.conversationId === conversationId) : items
+    if (!q) return scoped
+    return scoped.filter((a) => {
       const hay = `${a.title} ${a.type} ${a.conversationTitle ?? ''}`.toLowerCase()
       return hay.includes(q)
     })
-  }, [items, query])
+  }, [conversationId, items, query])
 
   const openPreview = async (id: string) => {
     setPendingPreviewId(id)
@@ -105,7 +112,7 @@ export function ArtifactLibrary() {
           />
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">
-          {loading ? '加载中…' : `共 ${items.length} 个 · 显示 ${filtered.length} 个`}
+          {loading ? '加载中…' : `共 ${filtered.length} 个`}
         </div>
       </div>
 
@@ -118,7 +125,7 @@ export function ArtifactLibrary() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              {items.length === 0 ? '还没有产物' : '没有匹配项'}
+              {items.length === 0 || !query.trim() ? '还没有产物' : '没有匹配项'}
             </div>
           ) : (
             filtered.map((a) => {
@@ -145,9 +152,11 @@ export function ArtifactLibrary() {
                         <span className="mx-1">·</span>
                         {formatTime(a.createdAt)}
                       </div>
-                      <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                        {a.conversationTitle ?? '（无会话）'}
-                      </div>
+                      {showConversationTitle && (
+                        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                          {a.conversationTitle ?? '（无会话）'}
+                        </div>
+                      )}
                     </div>
                   </button>
                   <button

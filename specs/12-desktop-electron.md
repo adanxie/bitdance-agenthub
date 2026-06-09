@@ -84,7 +84,7 @@ electron/
 
 scripts/
 ├── electron-dev.mjs        # spawn electron 入口（注入 AGENTHUB_DEV=1）
-├── electron-prebuild.mjs   # next build 后拷 static/public + 清 broken symlinks
+├── electron-prebuild.mjs   # next build 后补齐 standalone 资源/依赖 + 清理 symlinks/重复 runtime
 └── run-electron-node.mjs   # 跨平台用 ELECTRON_RUN_AS_NODE=1 跑 npm CLI（dev/build/db:*）
 
 dist-electron/           # tsc 输出（gitignored）
@@ -285,7 +285,7 @@ pnpm dev/test    → ensure-node-sqlite → node/vitest/playwright(纯 Node)
 
 ```
 1. pnpm build              # next build 在 Electron Node 里跑，standalone 自带 ABI 130 .node
-2. pnpm electron:prebuild  # 拷 static/public + 清 broken symlinks
+2. pnpm electron:prebuild  # 拷 static/public + 补依赖 + 清 broken symlinks/重复 runtime
 3. pnpm electron:tsc       # 编 main 进程
 4. electron-builder        # 打包；配 npmRebuild: false 禁用内置 rebuild（已经不需要）
 ```
@@ -308,6 +308,7 @@ pnpm dev/test    → ensure-node-sqlite → node/vitest/playwright(纯 Node)
 - `@openai/codex` 通过 optionalDependencies 携带平台二进制包（darwin / linux / win32 × x64 / arm64）
 - `next.config.ts` 必须把 `@openai/codex-sdk` / `@openai/codex` 放进 `serverExternalPackages`，避免被打包器内联后丢失 CLI binary 查找语义
 - `scripts/electron-prebuild.mjs` 的 standalone 依赖补齐逻辑会递归读取 dependencies / optionalDependencies，把当前平台可用的 Codex runtime 一起带进 `.next/standalone/node_modules`
+- `scripts/electron-prebuild.mjs` 只保留顶层 npm alias 平台包（如 `@openai/codex-darwin-arm64`），删除 Next tracer 可能额外带入的 `.pnpm/@openai+codex@...-<platform>` 重复 runtime store，避免 Electron 安装体积多出约 190MB
 - Codex adapter 默认 `networkAccessEnabled=false`、`webSearchMode='disabled'`；Review 模式 read-only，Auto 模式 workspace-write；子进程 `CODEX_HOME` 指到 AgentHub dataDir 下，避免继承用户 `~/.codex` / CC Switch 配置
 - Codex adapter 的 AgentHub MCP bridge 由 `scripts/agenthub-codex-mcp.mjs` 启动；Next standalone 必须通过 `outputFileTracingIncludes` 把该脚本复制到 `.next/standalone/scripts/`，Electron embedded server 会设置 `AGENTHUB_INTERNAL_BASE_URL`
 
@@ -362,9 +363,11 @@ const standaloneRoot = appPath.endsWith('.asar')
 require(path.join(standaloneRoot, '.next', 'standalone', 'server.js'))
 ```
 
-**`scripts/electron-prebuild.mjs` 做两件事**：
+**`scripts/electron-prebuild.mjs` 做四件事**：
 1. 把 `.next/static` 与 `public/` 拷进 `.next/standalone/` 子树。Next standalone 默认不包含这两份内容，server.js 启动后会找不到静态资源
-2. 扫 standalone 子树清除 broken symlinks。pnpm 在 `.next/standalone/node_modules/.pnpm/node_modules/` 里有部分 hoist 入口指向未被 Next file tracer 收录的旧版本（典型：`semver -> ../semver@6.3.1/...`，但 standalone 只带 `semver@7.8.1`）。这些 dangling link 运行时无害，但 electron-builder 打包阶段 `stat` 会 ENOENT
+2. 递归补齐 `package.json` dependencies / optionalDependencies 在 `.next/standalone/node_modules` 中缺失的运行时依赖
+3. 删除 Codex npm alias 已经提供的平台 runtime 对应的 `.pnpm/@openai+codex@...-<platform>` 重复 store；运行时解析走顶层 alias 包，重复 store 只会增加安装体积
+4. 扫 standalone 子树清除 broken symlinks。pnpm 在 `.next/standalone/node_modules/.pnpm/node_modules/` 里有部分 hoist 入口指向未被 Next file tracer 收录的旧版本（典型：`semver -> ../semver@6.3.1/...`，但 standalone 只带 `semver@7.8.1`）。这些 dangling link 运行时无害，但 electron-builder 打包阶段 `stat` 会 ENOENT
 
 ### 6.6 next.config.ts 改动
 
@@ -419,7 +422,7 @@ const nextConfig: NextConfig = {
 ```bash
 pnpm electron:build
 # 1. pnpm build           — ensure Electron ABI;Next 在 Electron Node 里 build，standalone 自带 ABI 130 .node
-# 2. pnpm electron:prebuild — 拷 static/public + 清 broken symlinks
+# 2. pnpm electron:prebuild — 拷 static/public + 补依赖 + 清 broken symlinks/重复 runtime
 # 3. pnpm electron:tsc      — 编 main 进程到 dist-electron/main.js
 # 4. electron-builder       — 打包；npmRebuild: false，直接复用现成的 ABI 130 .node
 # 输出 release/AgentHub-<ver>.dmg、release/AgentHub-<ver>-setup.exe

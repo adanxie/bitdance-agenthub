@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FolderUp,
+  Info,
   KeyRound,
   Loader2,
   Monitor,
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AppSettingsRow } from '@/db/schema'
 import {
   fetchAppSettings,
@@ -75,6 +77,7 @@ export function SettingsDialog({
   const [restartRequired, setRestartRequired] = useState(false)
   const [connectionHints, setConnectionHints] = useState<ConnectionHint[]>([])
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  const [tab, setTab] = useState('keys')
   const [form, setForm] = useState<SettingsForm>({
     anthropicApiKey: '',
     anthropicBaseUrl: '',
@@ -244,10 +247,7 @@ export function SettingsDialog({
       <DialogContent className="grid max-h-[calc(100vh-2rem)] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
-          <DialogDescription>
-            填写常用供应商的 API Key。填写后将覆盖系统环境变量；留空则继续使用环境变量（如有）。
-            Agent 设置中单独配置的 Key 仍然优先级最高。
-          </DialogDescription>
+          <DialogDescription className="sr-only">AgentHub 设置</DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -255,21 +255,40 @@ export function SettingsDialog({
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <Tabs defaultValue="keys" className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-            <TabsList className="justify-self-start">
-              <TabsTrigger value="keys">
-                <KeyRound className="size-3.5" />
-                供应商 Key
-              </TabsTrigger>
-              <TabsTrigger value="mobile">
-                <Smartphone className="size-3.5" />
-                移动端
-              </TabsTrigger>
-              <TabsTrigger value="publish">
-                <FolderUp className="size-3.5" />
-                发布
-              </TabsTrigger>
-            </TabsList>
+          <Tabs value={tab} onValueChange={setTab} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <TabsList>
+                <TabsTrigger value="keys">
+                  <KeyRound className="size-3.5" />
+                  供应商 Key
+                </TabsTrigger>
+                <TabsTrigger value="mobile">
+                  <Smartphone className="size-3.5" />
+                  移动端
+                </TabsTrigger>
+                <TabsTrigger value="publish">
+                  <FolderUp className="size-3.5" />
+                  发布
+                </TabsTrigger>
+              </TabsList>
+              {tab === 'keys' && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      type="button"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                      aria-label="供应商 Key 说明"
+                    >
+                      <Info className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" align="end" className="max-w-72 whitespace-normal text-left leading-5">
+                      填写常用供应商的 API Key。填写后将覆盖系统环境变量；留空则继续使用环境变量（如有）。
+                      Agent 设置中单独配置的 Key 仍然优先级最高。
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
 
             <div className="min-h-0 overflow-y-auto pr-1">
               <TabsContent value="keys" className="mt-0 flex flex-col gap-3 py-1">

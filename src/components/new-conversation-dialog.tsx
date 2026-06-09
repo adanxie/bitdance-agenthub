@@ -159,7 +159,7 @@ export function NewConversationDialog({
               className="mt-0.5 accent-primary"
             />
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium">沙箱隔离（推荐）</div>
+              <div className="text-xs font-medium">沙箱隔离</div>
               <div className="mt-0.5 text-[10px] text-muted-foreground">
                 工作目录在 <code className="font-mono">.agenthub-data/</code> 内部，不接触你的真实代码
               </div>

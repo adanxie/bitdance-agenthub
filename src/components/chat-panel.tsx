@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AddAgentDialog } from '@/components/add-agent-dialog'
 import { AgentInfoPopover } from '@/components/agent-info-popover'
 import { AskUserQuestionDialog } from '@/components/ask-user-question-dialog'
+import { ArtifactLibrary } from '@/components/artifact-library'
 import { ConversationOutline } from '@/components/conversation-outline'
 import { FileLibraryDialog } from '@/components/file-library-dialog'
 import { FileTab } from '@/components/file-tab'
@@ -16,6 +17,13 @@ import { diffTabPendingId, isDiffTabId } from '@/components/pending-writes-panel
 import { PinnedMessagesBar } from '@/components/pinned-messages-bar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { MessageInput } from '@/components/message-input'
 import { MessageList } from '@/components/message-list'
 import { UsageBadge } from '@/components/usage-badge'
@@ -37,7 +45,6 @@ export function ChatPanel() {
   const fileExplorerOpen = useAppStore((s) => s.fileExplorerOpen)
   const previewArtifactId = useAppStore((s) => s.previewArtifactId)
   const setFileExplorerOpen = useAppStore((s) => s.setFileExplorerOpen)
-  const closeArtifactPreview = useAppStore((s) => s.closeArtifactPreview)
   const closeFile = useAppStore((s) => s.closeFile)
   const setActiveTab = useAppStore((s) => s.setActiveTab)
   const setMobileSidebarOpen = useAppStore((s) => s.setMobileSidebarOpen)
@@ -46,6 +53,7 @@ export function ChatPanel() {
   )
   const [addOpen, setAddOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
 
   const openFiles = useOpenFiles(conv?.id ?? '')
   const activeTab = useActiveTab(conv?.id ?? '')
@@ -145,12 +153,9 @@ export function ChatPanel() {
           </Button>
           <Button
             size="icon-sm"
-            variant={previewArtifactId ? 'default' : 'ghost'}
-            onClick={() => {
-              if (previewArtifactId) closeArtifactPreview()
-            }}
-            disabled={!previewArtifactId}
-            title={previewArtifactId ? '关闭产物预览' : '产物预览（点产物卡片打开）'}
+            variant={artifactsOpen || previewArtifactId ? 'default' : 'ghost'}
+            onClick={() => setArtifactsOpen(true)}
+            title="本会话产物库"
           >
             <Layers className="size-4" />
           </Button>
@@ -247,6 +252,21 @@ export function ChatPanel() {
         onOpenChange={setFilesOpen}
         conversationId={conv.id}
       />
+
+      <Dialog open={artifactsOpen} onOpenChange={setArtifactsOpen}>
+        <DialogContent className="grid max-h-[min(680px,calc(100vh-2rem))] max-w-md grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0">
+          <DialogHeader className="border-b px-4 py-3">
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <Layers className="size-4 text-muted-foreground" />
+              会话产物
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {conv.title}
+            </DialogDescription>
+          </DialogHeader>
+          <ArtifactLibrary conversationId={conv.id} showConversationTitle={false} />
+        </DialogContent>
+      </Dialog>
 
       <AskUserQuestionDialog conversationId={conv.id} />
     </main>

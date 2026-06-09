@@ -215,6 +215,45 @@ if (optionalOnly.length > 0) {
   )
 }
 
+// @openai/codex 的平台 runtime 是 npm alias 包：
+//   @openai/codex-darwin-arm64 -> npm:@openai/codex@0.136.0-darwin-arm64
+// Next standalone 可能已经 trace 进 `.pnpm/@openai+codex@...-darwin-arm64`，
+// 下面补齐逻辑又会把 alias 包拷到顶层 `node_modules/@openai/codex-darwin-arm64`。
+// 运行时 SDK 通过顶层 alias 包解析 binary，.pnpm 那份会变成 190MB+ 的重复 vendor。
+function removeDuplicatedCodexRuntimeStores() {
+  const codexPackageJson = path.join(standaloneNodeModules, '@openai', 'codex', 'package.json')
+  if (!fs.existsSync(codexPackageJson)) return 0
+
+  let optionalDependencies
+  try {
+    optionalDependencies = JSON.parse(fs.readFileSync(codexPackageJson, 'utf8')).optionalDependencies
+  } catch {
+    return 0
+  }
+  if (!optionalDependencies || typeof optionalDependencies !== 'object') return 0
+
+  let removed = 0
+  for (const [aliasName, targetSpec] of Object.entries(optionalDependencies)) {
+    if (typeof targetSpec !== 'string') continue
+    if (!fs.existsSync(path.join(standaloneNodeModules, ...aliasName.split('/')))) continue
+
+    const match = /^npm:(@[^/]+)\/([^@]+)@(.+)$/.exec(targetSpec)
+    if (!match) continue
+    const [, scope, name, version] = match
+    const storeDir = path.join(standaloneNodeModules, '.pnpm', `${scope}+${name}@${version}`)
+    if (!fs.existsSync(storeDir)) continue
+
+    fs.rmSync(storeDir, { recursive: true, force: true })
+    removed++
+  }
+  return removed
+}
+
+const removedCodexRuntimeStores = removeDuplicatedCodexRuntimeStores()
+if (removedCodexRuntimeStores > 0) {
+  console.log(`✓ dedupe: removed ${removedCodexRuntimeStores} duplicate Codex runtime store package(s)`)
+}
+
 // ─── D: 走查 symlinks（dep-copy 之后再做，防止过程中又混入 symlink）────
 let droppedDangling = 0
 let materialized = 0
