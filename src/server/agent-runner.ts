@@ -1682,6 +1682,8 @@ function buildAgentHubToolGuidance(
       '用途：创建用户需要预览、下载、交接或长期保存的产物；不要用它记录普通聊天结论。',
       'web_app 正确参数：write_artifact({ type: "web_app", title: "登录页原型", content: { files: { "index.html": "<!doctype html>...", "style.css": "body { ... }", "script.js": "..." }, entry: "index.html" } })。',
       'document 正确参数：write_artifact({ type: "document", title: "PRD", content: { format: "markdown", content: "# PRD\\n..." } })。',
+      'diagram 正确参数：write_artifact({ type: "diagram", title: "系统调用流程", content: { syntax: "mermaid", source: "flowchart TD\\n  U[\\"用户\\"] --> A[\\"AgentHub\\"]\\n  A --> LLM[\\"LLM\\"]\\n  LLM --> T[\\"工具调用\\"]", theme: "default" } })。适合流程图、时序图、架构图、依赖关系图；不要把 Mermaid 放进 document 代码块里冒充图产物。',
+      'diagram 规则：中文、数学公式、括号、冒号、斜杠等 label 一律写成 A["..."]；一行只写一条边；不要把 ```mermaid fence 传给 source。write_artifact 会校验 Mermaid，若返回 Invalid Mermaid diagram，必须根据错误修正 source 后重新调用工具。',
       'ppt 正确参数：write_artifact({ type: "ppt", title: "Q2 复盘", content: { title: "Q2 复盘", theme: { primary: "1A3C6E", background: "F8F9FA", surface: "FFFFFF", textBody: "2C3E50", textMuted: "6B7280", accentPositive: "2B7A4B", accentNegative: "C0392B", divider: "E0E4E8", fontHeading: "Inter", fontBody: "Inter" }, slides: [{ title: "Q2 复盘", subtitle: "关键指标", layout: "metrics", blocks: [{ type: "metric", label: "ARR", value: "$12M", change: "+18%", tone: "positive" }, { type: "callout", title: "下一步", text: "聚焦企业客户扩张", tone: "info" }] }] } })。',
       'ppt 支持 blocks：heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer；columns 内只放 paragraph/bullets/metric/callout。不要在 ppt JSON 里嵌入 base64/data URI 大资产。',
       '常见错误：把 content 作为 JSON 字符串传入，例如 content: "{\\"format\\":\\"markdown\\"}"；必须传原始对象。',

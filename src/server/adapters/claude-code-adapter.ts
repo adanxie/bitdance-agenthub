@@ -105,13 +105,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     const agenthubMcpServer = createSdkMcpServer({
       name: 'agenthub',
       version: '1.0.0',
-      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片 / PPT），PPT 优先使用 semantic blocks（heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer），不要在 PPT JSON 中嵌入 base64/data URI 大资产；用 read_artifact 读其他 Agent 的产物，用 deploy_artifact 为 web_app artifact 生成本地预览路径，用 deploy_workspace 为当前 workspace 内 dist/build/out 等静态目录生成部署卡。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。部署工具返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
+      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片 / PPT / Mermaid 图），流程、架构、时序、依赖关系优先用 type="diagram" 且 content 为 { syntax: "mermaid", source }；Mermaid 图会在写入时做预检，中文/数学/括号等 label 写成 A["..."]，不要传 ```mermaid fence，若工具返回 Invalid Mermaid diagram 必须修正 source 后重试；PPT 优先使用 semantic blocks（heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer），不要在 PPT JSON 中嵌入 base64/data URI 大资产；用 read_artifact 读其他 Agent 的产物，用 deploy_artifact 为 web_app artifact 生成本地预览路径，用 deploy_workspace 为当前 workspace 内 dist/build/out 等静态目录生成部署卡。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。部署工具返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
       tools: [
         tool(
           'write_artifact',
-          'Create a previewable artifact (web_app / document / image / ppt) in the current conversation, or a new version of an existing one (pass parentArtifactId; version auto-increments). For ppt, prefer structured slides with semantic blocks: heading, paragraph, bullets, metric, quote, timeline, columns, callout, divider, spacer. Do not embed raw base64/data URI assets in ppt JSON. Use outputKey when a dispatched task declares an expected output id. Use this for content that should be previewed in a card — NOT for files in the workspace.',
+          'Create a previewable artifact (web_app / document / image / ppt / diagram) in the current conversation, or a new version of an existing one (pass parentArtifactId; version auto-increments). For diagram, pass content { syntax: "mermaid", source: "flowchart TD..." }; quote labels containing Chinese/math/symbols as A["..."], omit Markdown fences, and retry with corrected source if validation returns Invalid Mermaid diagram. For ppt, prefer structured slides with semantic blocks: heading, paragraph, bullets, metric, quote, timeline, columns, callout, divider, spacer. Do not embed raw base64/data URI assets in ppt JSON. Use outputKey when a dispatched task declares an expected output id. Use this for content that should be previewed in a card — NOT for files in the workspace.',
           {
-            type: z.enum(['web_app', 'document', 'image', 'ppt']),
+            type: z.enum(['web_app', 'document', 'image', 'ppt', 'diagram']),
             title: z.string(),
             content: z.unknown(),
             outputKey: z.string().optional(),

@@ -566,20 +566,30 @@ function ToolCluster({
 }) {
   const [expanded, setExpanded] = useState(false)
 
-  // 统计每种工具数量 + 是否有 running / error
-  const counts = new Map<string, number>()
+  // 按状态分别统计工具名，避免“创建产物×5”把成功/失败混在一起。
+  const successCounts = new Map<string, number>()
+  const errorCounts = new Map<string, number>()
+  const runningCounts = new Map<string, number>()
   let runningCount = 0
   let errorCount = 0
+  let successCount = 0
   for (const t of tools) {
     const displayName = getToolDisplayName(t.part.toolName)
-    counts.set(displayName, (counts.get(displayName) ?? 0) + 1)
     const c = resultByCallId.get(t.part.callId)
-    if (!c) runningCount++
-    else if (c.isError) errorCount++
+    if (!c) {
+      runningCount++
+      runningCounts.set(displayName, (runningCounts.get(displayName) ?? 0) + 1)
+    } else if (c.isError) {
+      errorCount++
+      errorCounts.set(displayName, (errorCounts.get(displayName) ?? 0) + 1)
+    } else {
+      successCount++
+      successCounts.set(displayName, (successCounts.get(displayName) ?? 0) + 1)
+    }
   }
-  const distribution = Array.from(counts.entries())
-    .map(([name, n]) => (n > 1 ? `${name}×${n}` : name))
-    .join(' · ')
+  const successDistribution = formatToolDistribution(successCounts)
+  const errorDistribution = formatToolDistribution(errorCounts)
+  const runningDistribution = formatToolDistribution(runningCounts)
 
   const overallState: 'running' | 'success' | 'error' =
     runningCount > 0 ? 'running' : errorCount > 0 ? 'error' : 'success'
@@ -612,8 +622,33 @@ function ToolCluster({
           )}
           <span className="font-medium">工具调用 × {tools.length}</span>
           <span className="text-muted-foreground">·</span>
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-            {distribution}
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {successDistribution && (
+              <>
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                  成功 {successCount}
+                </span>
+                <span className="font-mono">：{successDistribution}</span>
+              </>
+            )}
+            {errorDistribution && (
+              <>
+                {successDistribution && <span> · </span>}
+                <span className="font-medium text-red-700 dark:text-red-400">
+                  失败 {errorCount}
+                </span>
+                <span className="font-mono">：{errorDistribution}</span>
+              </>
+            )}
+            {runningDistribution && (
+              <>
+                {(successDistribution || errorDistribution) && <span> · </span>}
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  进行中 {runningCount}
+                </span>
+                <span className="font-mono">：{runningDistribution}</span>
+              </>
+            )}
           </span>
           {runningCount > 0 && (
             <span className="ml-auto shrink-0 text-[10px] text-amber-600 dark:text-amber-400">
@@ -643,6 +678,12 @@ function ToolCluster({
       </CardContent>
     </Card>
   )
+}
+
+function formatToolDistribution(counts: Map<string, number>): string {
+  return Array.from(counts.entries())
+    .map(([name, n]) => (n > 1 ? `${name}×${n}` : name))
+    .join(' · ')
 }
 
 // ─── ArtifactRef ───────────────────────────────────────

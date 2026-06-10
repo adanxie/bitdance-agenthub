@@ -22,7 +22,7 @@ function pickLanguage(filename: string | undefined, type: ArtifactType) {
   if (name.endsWith('.ts') || name.endsWith('.tsx')) return [javascript({ typescript: true, jsx: name.endsWith('.tsx') })]
   if (name.endsWith('.js') || name.endsWith('.mjs') || name.endsWith('.jsx')) return [javascript({ jsx: name.endsWith('.jsx') })]
   if (name.endsWith('.html') || name.endsWith('.htm')) return [html()]
-  if (name.endsWith('.md') || name.endsWith('.markdown') || type === 'document') return [markdown()]
+  if (name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.mmd') || type === 'document') return [markdown()]
   if (type === 'web_app') return [html()]
   return []
 }

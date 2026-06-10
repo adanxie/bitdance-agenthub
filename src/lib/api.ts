@@ -25,6 +25,7 @@ export interface ArtifactListItem {
   type: string
   title: string
   version: number
+  parentArtifactId: string | null
   createdByAgentId: string
   createdAt: number
 }

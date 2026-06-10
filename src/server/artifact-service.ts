@@ -2,7 +2,7 @@ import { desc, eq, inArray } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { ArtifactRow } from '@/db/schema'
-import { buildArtifactContent } from '@/server/artifact-content'
+import { buildArtifactContent, describeArtifactContentError } from '@/server/artifact-content'
 import { newArtifactId } from '@/server/ids'
 
 /**
@@ -18,6 +18,7 @@ export interface ArtifactWithMeta {
   type: string
   title: string
   version: number
+  parentArtifactId: string | null
   createdByAgentId: string
   createdAt: number
 }
@@ -41,6 +42,7 @@ export async function listArtifacts(): Promise<ArtifactWithMeta[]> {
     type: r.type,
     title: r.title,
     version: r.version,
+    parentArtifactId: r.parentArtifactId,
     createdByAgentId: r.createdByAgentId,
     createdAt: r.createdAt,
   }))
@@ -83,7 +85,11 @@ export async function createArtifactVersion(
 
   const content = buildArtifactContent(parent.type, rawContent)
   if (!content) {
-    return { ok: false, error: `Invalid content for type ${parent.type}`, status: 400 }
+    return {
+      ok: false,
+      error: describeArtifactContentError(parent.type, rawContent) ?? `Invalid content for type ${parent.type}`,
+      status: 400,
+    }
   }
 
   const [artifact] = await db

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildArtifactContent } from './artifact-content'
+import { buildArtifactContent, describeArtifactContentError } from './artifact-content'
 
 describe('buildArtifactContent', () => {
   it('document: 标准对象 { format, content }', () => {
@@ -179,6 +179,67 @@ describe('buildArtifactContent', () => {
     })
   })
 
+  it('diagram: Mermaid 标准对象', () => {
+    expect(
+      buildArtifactContent('diagram', {
+        syntax: 'mermaid',
+        source: 'flowchart TD\nA-->B',
+        theme: 'neutral',
+      }),
+    ).toEqual({
+      type: 'diagram',
+      syntax: 'mermaid',
+      source: 'flowchart TD\nA-->B',
+      theme: 'neutral',
+    })
+  })
+
+  it('diagram: 纯 Mermaid 字符串', () => {
+    expect(buildArtifactContent('diagram', 'sequenceDiagram\nA->>B: hello')).toEqual({
+      type: 'diagram',
+      syntax: 'mermaid',
+      source: 'sequenceDiagram\nA->>B: hello',
+    })
+  })
+
+  it('diagram: 自动规整 flowchart 中文与数学标签', () => {
+    expect(
+      buildArtifactContent(
+        'diagram',
+        [
+          'flowchart LR',
+          '    A[研究背景: 堆叠智能超表面SIM]',
+          '    subgraph C[本文提出的通用多端口网络框架]',
+          '        C21[全局矩阵求逆复杂度 从O(LN)^3 降至 O(L*N^2)]',
+          '    end',
+          '    A --> C',
+          '    style A fill:#1A3C6E,color:#fff,font-weight:bold',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      type: 'diagram',
+      syntax: 'mermaid',
+      source: [
+        'flowchart LR',
+        '    A["研究背景: 堆叠智能超表面SIM"]',
+        '    subgraph C["本文提出的通用多端口网络框架"]',
+        '        C21["全局矩阵求逆复杂度 从O(LN)^3 降至 O(L*N^2)"]',
+        '    end',
+        '    A --> C',
+        '    style A fill:#1A3C6E,color:#fff,font-weight:bold',
+      ].join('\n'),
+    })
+  })
+
+  it('diagram: 返回可操作的 Mermaid 校验错误', () => {
+    const source = 'flowchart LR\nA["开始"]\nstyle A fill:#fff 这里混入了正文'
+
+    expect(buildArtifactContent('diagram', source)).toBeNull()
+    expect(describeArtifactContentError('diagram', source)).toBe(
+      'Invalid Mermaid diagram: Line 3: invalid style syntax. Use "style ID fill:#hex,color:#hex" without trailing prose.\nstyle A fill:#fff 这里混入了正文',
+    )
+  })
+
   it('ppt: 标准 { slides } 对象', () => {
     expect(
       buildArtifactContent('ppt', {
@@ -339,6 +400,8 @@ describe('buildArtifactContent', () => {
     expect(buildArtifactContent('document', 123)).toBeNull()
     expect(buildArtifactContent('diff', { targetArtifactId: 'art_target', hunks: [] })).toBeNull()
     expect(buildArtifactContent('code_file', { language: 'typescript' })).toBeNull()
+    expect(buildArtifactContent('diagram', { syntax: 'plantuml', source: '@startuml\n@enduml' })).toBeNull()
+    expect(buildArtifactContent('diagram', { source: '' })).toBeNull()
     expect(buildArtifactContent('ppt', { slides: [] })).toBeNull()
     expect(buildArtifactContent('ppt', { slides: [{}] })).toBeNull()
     expect(buildArtifactContent('ppt', 123)).toBeNull()

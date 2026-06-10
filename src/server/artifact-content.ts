@@ -1,5 +1,8 @@
+import { normaliseMermaidSource } from '@/shared/mermaid-normalize'
 import { normalizeBlocks } from '@/shared/ppt-normalize'
-import type { ArtifactContent, ArtifactType, DiffHunk, PptLayout, PptSlide, PptTheme } from '@/shared/types'
+import type { ArtifactContent, ArtifactType, DiffHunk, MermaidTheme, PptLayout, PptSlide, PptTheme } from '@/shared/types'
+
+const MAX_DIAGRAM_SOURCE_CHARS = 50_000
 
 /**
  * 把 LLM 或用户给的松散 content 规整成强类型 ArtifactContent;非法返回 null。
@@ -84,6 +87,35 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
     }
     if (typeof raw === 'string') {
       return { type: 'document', format: 'markdown', content: raw }
+    }
+    return null
+  }
+
+  if (type === 'diagram') {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>
+      const syntax = readString(obj.syntax) ?? readString(obj.format) ?? 'mermaid'
+      if (syntax.toLowerCase() !== 'mermaid') return null
+      const source =
+        readString(obj.source) ??
+        readString(obj.mermaid) ??
+        readString(obj.code) ??
+        readString(obj.content)
+      if (!source) return null
+      const normalised = normaliseDiagramSourceForContent(source)
+      if (!normalised) return null
+      const theme = normaliseMermaidTheme(obj.theme)
+      return {
+        type: 'diagram',
+        syntax: 'mermaid',
+        source: normalised,
+        ...(theme ? { theme } : {}),
+      }
+    }
+    if (typeof raw === 'string') {
+      const source = normaliseDiagramSourceForContent(raw)
+      if (!source) return null
+      return { type: 'diagram', syntax: 'mermaid', source }
     }
     return null
   }
@@ -199,6 +231,33 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
   return null
 }
 
+export function describeArtifactContentError(type: ArtifactType, rawInput: unknown): string | null {
+  if (type !== 'diagram') return null
+  const raw = unwrapStringifiedContent(rawInput)
+  const source =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? readString((raw as Record<string, unknown>).source) ??
+        readString((raw as Record<string, unknown>).mermaid) ??
+        readString((raw as Record<string, unknown>).code) ??
+        readString((raw as Record<string, unknown>).content)
+      : typeof raw === 'string'
+        ? raw
+        : null
+  if (!source) return 'Invalid diagram content: missing Mermaid source.'
+  if (source.trim().length > MAX_DIAGRAM_SOURCE_CHARS) {
+    return `Invalid diagram content: Mermaid source exceeds ${MAX_DIAGRAM_SOURCE_CHARS} characters.`
+  }
+  const result = normaliseMermaidSource(source)
+  if (!result.ok) return `Invalid Mermaid diagram: ${result.error}`
+  return null
+}
+
+function normaliseDiagramSourceForContent(source: string): string | null {
+  if (source.trim().length > MAX_DIAGRAM_SOURCE_CHARS) return null
+  const result = normaliseMermaidSource(source)
+  return result.ok ? result.source : null
+}
+
 const CONTENT_WRAPPER_KEYS = [
   'format',
   'content',
@@ -211,6 +270,8 @@ const CONTENT_WRAPPER_KEYS = [
   'js',
   'code',
   'url',
+  'source',
+  'mermaid',
   'targetArtifactId',
   'targetId',
   'hunks',
@@ -276,7 +337,7 @@ function isWrapperObject(v: unknown): v is Record<string, unknown> {
 
 /** content 串里出现包装字段名 —— 用于决定是否值得做容错解析(避免误伤正常内容)。 */
 function hasWrapperSignature(s: string): boolean {
-  return /"(?:format|content|markdown|text|files|entry|html|targetArtifactId|targetId|hunks|diff|patch|workspacePath|path|slides|blocks|subtitle)"\s*:/.test(s)
+  return /"(?:format|content|markdown|text|files|entry|html|source|mermaid|targetArtifactId|targetId|hunks|diff|patch|workspacePath|path|slides|blocks|subtitle)"\s*:/.test(s)
 }
 
 /** 把非法 JSON 转义 `\X`(X ∉ `"\/bfnrtu`)改成合法的 `\\X`,修掉模型常见的 `\|` 等。 */
@@ -442,6 +503,17 @@ function normalisePptTheme(value: unknown): PptTheme | undefined {
   const fontBody = readString(obj.fontBody) ?? readString(obj.bodyFont) ?? readString(obj.font)
   if (fontBody) theme.fontBody = fontBody
   return Object.keys(theme).length > 0 ? theme : undefined
+}
+
+function normaliseMermaidTheme(value: unknown): MermaidTheme | undefined {
+  const theme = readString(value)
+  return theme === 'default' ||
+    theme === 'base' ||
+    theme === 'dark' ||
+    theme === 'forest' ||
+    theme === 'neutral'
+    ? theme
+    : undefined
 }
 
 function containsUnboundedBinaryPayload(value: unknown): boolean {

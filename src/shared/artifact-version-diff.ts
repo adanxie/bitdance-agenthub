@@ -36,6 +36,20 @@ export function buildArtifactVersionDiff(
     }
     case 'web_app':
       return buildWebAppDiff(oldContent, newContent as Extract<ArtifactContent, { type: 'web_app' }>)
+    case 'diagram': {
+      const next = newContent as Extract<ArtifactContent, { type: 'diagram' }>
+      return {
+        status: 'ready',
+        sections: [
+          {
+            key: 'diagram',
+            title: 'diagram.mmd',
+            oldText: oldContent.source,
+            newText: next.source,
+          },
+        ],
+      }
+    }
     case 'ppt': {
       const next = newContent as Extract<ArtifactContent, { type: 'ppt' }>
       return {

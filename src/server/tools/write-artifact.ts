@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
-import { buildArtifactContent } from '@/server/artifact-content'
+import { buildArtifactContent, describeArtifactContentError } from '@/server/artifact-content'
 import { newArtifactId } from '@/server/ids'
 
 import type { ToolDef } from './types'
@@ -24,7 +24,7 @@ import type { ToolDef } from './types'
  */
 
 const ArgsSchema = z.object({
-  type: z.enum(['web_app', 'document', 'image', 'ppt']),
+  type: z.enum(['web_app', 'document', 'image', 'ppt', 'diagram']),
   title: z.string().min(1),
   content: z.unknown(),
   outputKey: z.string().min(1).optional(),
@@ -35,22 +35,22 @@ const ArgsSchema = z.object({
 export const writeArtifactTool: ToolDef = {
   name: 'write_artifact',
   description:
-    'Create a new artifact, or a new version of an existing one. Pass parentArtifactId to create a version that links to the prior; version auto-increments. Use this to produce code/web/docs/images/PPT decks that the user can preview.',
+    'Create a new artifact, or a new version of an existing one. Pass parentArtifactId to create a version that links to the prior; version auto-increments. Use this to produce code/web/docs/images/PPT decks/diagrams that the user can preview.',
   parameters: {
     type: 'object',
     required: ['type', 'title', 'content'],
     properties: {
       type: {
         type: 'string',
-        enum: ['web_app', 'document', 'image', 'ppt'],
+        enum: ['web_app', 'document', 'image', 'ppt', 'diagram'],
         description:
-          'web_app for HTML/CSS/JS bundles, document for markdown text, image for URL or data URI, ppt for slide decks (structured JSON, exportable to a real .pptx)',
+          'web_app for HTML/CSS/JS bundles, document for markdown text, image for URL or data URI, ppt for slide decks (structured JSON, exportable to a real .pptx), diagram for Mermaid diagrams',
       },
       title: { type: 'string', description: 'Short human-readable title' },
       content: {
         type: 'object',
         description:
-          'Artifact body — pass as a JSON OBJECT, do NOT JSON-stringify it into a quoted string. For web_app: { files: { "index.html": "...", "style.css"?, "script.js"? }, entry: "index.html" }. For document: { format: "markdown", content: "...markdown text..." }. For image: { url: "...", alt: "..." }. For ppt: { title?, theme?: { primary?: "1A3C6E", background?: "F8F9FA", surface?: "FFFFFF", textBody?: "2C3E50", textMuted?: "95A5A6", accentPositive?: "2B7A4B", accentNegative?: "C0392B", divider?: "E0E4E8", fontHeading?: "Inter", fontBody?: "Inter" }, slides: [{ title?, subtitle?, layout?: "title"|"title-bullets"|"section"|"blank"|"content"|"two-column"|"metrics"|"timeline"|"quote", blocks?: [{ type: "heading", text, level? }, { type: "paragraph", text }, { type: "bullets", items, ordered? }, { type: "metric", label, value, change?, tone? }, { type: "quote", text, attribution? }, { type: "timeline", items: [{ label, title?, text? }] }, { type: "columns", columns: [{ title?, blocks: [{ type: "paragraph"|"bullets"|"metric"|"callout", ... }] }] }, { type: "callout", title?, text, tone? }, { type: "divider" }, { type: "spacer", size? }], notes? }] }. Legacy slides with bullets are still accepted, but prefer blocks for polished decks. Hex colors have no "#"; ppt JSON must not embed raw base64/data URI assets. Common mistake to avoid: sending content as a string like "{\\"format\\":\\"markdown\\",...}" — send the raw object, not its JSON text.',
+          'Artifact body — pass as a JSON OBJECT, do NOT JSON-stringify it into a quoted string. For web_app: { files: { "index.html": "...", "style.css"?, "script.js"? }, entry: "index.html" }. For document: { format: "markdown", content: "...markdown text..." }. For image: { url: "...", alt: "..." }. For diagram: { syntax: "mermaid", source: "flowchart TD\\nA[\\"中文 / formula O(N^2)\\"] --> B[\\"结果\\"]", theme?: "default"|"base"|"dark"|"forest"|"neutral" }. Diagram source is preflighted: quote labels with Chinese/math/symbols as A["..."], use one edge per line, omit ```mermaid fences, and if the tool returns Invalid Mermaid diagram, fix source and call again. For ppt: { title?, theme?: { primary?: "1A3C6E", background?: "F8F9FA", surface?: "FFFFFF", textBody?: "2C3E50", textMuted?: "95A5A6", accentPositive?: "2B7A4B", accentNegative?: "C0392B", divider?: "E0E4E8", fontHeading?: "Inter", fontBody?: "Inter" }, slides: [{ title?, subtitle?, layout?: "title"|"title-bullets"|"section"|"blank"|"content"|"two-column"|"metrics"|"timeline"|"quote", blocks?: [{ type: "heading", text, level? }, { type: "paragraph", text }, { type: "bullets", items, ordered? }, { type: "metric", label, value, change?, tone? }, { type: "quote", text, attribution? }, { type: "timeline", items: [{ label, title?, text? }] }, { type: "columns", columns: [{ title?, blocks: [{ type: "paragraph"|"bullets"|"metric"|"callout", ... }] }] }, { type: "callout", title?, text, tone? }, { type: "divider" }, { type: "spacer", size? }], notes? }] }. Legacy slides with bullets are still accepted, but prefer blocks for polished decks. Hex colors have no "#"; ppt JSON must not embed raw base64/data URI assets. Common mistake to avoid: sending content as a string like "{\\"format\\":\\"markdown\\",...}" — send the raw object, not its JSON text.',
       },
       parentArtifactId: {
         type: 'string',
@@ -73,7 +73,10 @@ export const writeArtifactTool: ToolDef = {
     const { type, title, content, parentArtifactId, outputKey } = parsed.data
     const fullContent = buildArtifactContent(type, content)
     if (!fullContent) {
-      return { ok: false, error: `Invalid content for type ${type}` }
+      return {
+        ok: false,
+        error: describeArtifactContentError(type, content) ?? `Invalid content for type ${type}`,
+      }
     }
 
     let version = 1

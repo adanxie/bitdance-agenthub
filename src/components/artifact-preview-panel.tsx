@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X, ZoomIn, ZoomOut } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -16,6 +16,7 @@ import { artifactPreviewPath } from '@/lib/artifact-preview'
 import { normalizeLang } from '@/lib/highlighter'
 import { cn } from '@/lib/utils'
 import { buildArtifactVersionDiff } from '@/shared/artifact-version-diff'
+import { formatMermaidError } from '@/shared/mermaid-normalize'
 import { normalizePptDeck, toEditablePptContent } from '@/shared/ppt-normalize'
 import { detectBulletTone, resolvePptTheme } from '@/shared/ppt-theme'
 import type { ArtifactContent, DiffHunk, PptBlock, PptColumnBlock, PptTheme, PptTone } from '@/shared/types'
@@ -121,17 +122,19 @@ export function ArtifactPreviewPanel() {
   return (
     <aside className="flex w-1/2 min-w-[420px] shrink-0 flex-col border-l bg-card max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:min-w-0">
       <header className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <TypeIcon type={artifact.type} />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{artifact.title}</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium" title={artifact.title}>
+              {artifact.title}
+            </div>
             <div className="text-xs text-muted-foreground">
               {artifact.type} · v{artifact.version}
               {hasMultiple && ` / ${versionCount}`}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {hasMultiple && (
             <>
               <Button
@@ -178,7 +181,7 @@ export function ArtifactPreviewPanel() {
           <a
             href={`/api/artifacts/${artifact.id}/export`}
             download
-            title={`下载${artifact.type === 'web_app' ? ' .zip' : artifact.type === 'document' ? ' .md' : artifact.type === 'ppt' ? '可编辑 .pptx' : ''}`}
+            title={`下载${artifact.type === 'web_app' ? ' .zip' : artifact.type === 'document' ? ' .md' : artifact.type === 'diagram' ? ' .mmd' : artifact.type === 'ppt' ? '可编辑 .pptx' : ''}`}
             className="inline-flex size-8 items-center justify-center rounded-lg text-foreground/70 transition hover:bg-muted hover:text-foreground"
           >
             <Download className="size-4" />
@@ -272,6 +275,8 @@ function ArtifactView({
       return wrap(<WebAppView artifactId={artifact.id} content={content} onSaveVersion={onSaveVersion} />)
     case 'document':
       return wrap(<DocumentView content={content} onSaveVersion={onSaveVersion} />)
+    case 'diagram':
+      return wrap(<DiagramView content={content} onSaveVersion={onSaveVersion} />)
     case 'image':
       return <ImageView content={content} />
     case 'code_file':
@@ -471,6 +476,191 @@ function DocumentView({
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ─── diagram: Mermaid 预览 + 源码编辑 ───────────────────
+function DiagramView({
+  content,
+  onSaveVersion,
+}: {
+  content: Extract<ArtifactContent, { type: 'diagram' }>
+  onSaveVersion: SaveVersionFn
+}) {
+  const [view, setView] = useState<'render' | 'edit'>('render')
+  const [draft, setDraft] = useState(content.source)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDraft(content.source)
+    setView('render')
+    setSaving(false)
+    setError(null)
+  }, [content])
+
+  const dirty = draft !== content.source
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await onSaveVersion({ syntax: 'mermaid', source: draft, theme: content.theme })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '提交失败（请检查 Mermaid 源码）')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 border-b px-2">
+        <ViewTab active={view === 'render'} onClick={() => setView('render')}>
+          <Eye className="size-3.5" />
+          预览
+        </ViewTab>
+        <ViewTab active={view === 'edit'} onClick={() => setView('edit')}>
+          <Pencil className="size-3.5" />
+          编辑源码
+        </ViewTab>
+      </div>
+      <div className="min-h-0 flex-1">
+        {view === 'render' ? (
+          <MermaidPreview content={content} />
+        ) : (
+          <ArtifactCodeEditor value={draft} onChange={setDraft} filename="diagram.mmd" type="diagram" />
+        )}
+      </div>
+      {view === 'edit' && (
+        <EditFooter
+          dirty={dirty}
+          saving={saving}
+          error={error}
+          onSave={save}
+          onReset={() => {
+            setDraft(content.source)
+            setError(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function MermaidPreview({ content }: { content: Extract<ArtifactContent, { type: 'diagram' }> }) {
+  const { resolvedTheme } = useTheme()
+  const [svg, setSvg] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [zoom, setZoom] = useState(1.25)
+
+  useEffect(() => {
+    setZoom(1.25)
+  }, [content.source])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setSvg('')
+
+    const render = async () => {
+      try {
+        const { default: mermaid } = await import('mermaid')
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: content.theme ?? (resolvedTheme === 'dark' ? 'dark' : 'default'),
+        })
+        const renderId = `agenthub-mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        const result = await mermaid.render(renderId, content.source)
+        if (!cancelled) setSvg(result.svg)
+      } catch (err) {
+        if (!cancelled) setError(formatMermaidError(err instanceof Error ? err.message : String(err)))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void render()
+    return () => {
+      cancelled = true
+    }
+  }, [content, resolvedTheme])
+
+  if (loading) {
+    return (
+      <div className="flex size-full items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        渲染图表中…
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex size-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <AlertCircle className="size-6 text-red-500" />
+        <div className="text-sm font-medium">Mermaid 渲染失败</div>
+        <pre className="max-w-full overflow-auto rounded-md bg-muted px-3 py-2 text-left font-mono text-xs text-muted-foreground">
+          {error}
+        </pre>
+      </div>
+    )
+  }
+
+  const diagramWidth = Math.round(920 * zoom)
+
+  return (
+    <div className="relative size-full bg-zinc-50 dark:bg-zinc-950">
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border bg-background/95 p-1 shadow-sm backdrop-blur">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => setZoom((v) => Math.max(0.5, Number((v - 0.25).toFixed(2))))}
+          disabled={zoom <= 0.5}
+          title="缩小"
+        >
+          <ZoomOut className="size-3.5" />
+        </Button>
+        <button
+          type="button"
+          className="min-w-12 rounded px-1.5 py-1 text-center font-mono text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          onClick={() => setZoom(1.25)}
+          title="重置缩放"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => setZoom((v) => Math.min(3, Number((v + 0.25).toFixed(2))))}
+          disabled={zoom >= 3}
+          title="放大"
+        >
+          <ZoomIn className="size-3.5" />
+        </Button>
+      </div>
+      <div className="size-full overflow-auto">
+        <div
+          className="grid min-h-full p-12 [place-items:safe_center]"
+          style={{ minWidth: `${diagramWidth + 96}px` }}
+        >
+          <div
+            className="overflow-auto rounded-md bg-white p-4 shadow-sm dark:bg-zinc-900 [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
+            style={{
+              width: `${diagramWidth}px`,
+              minWidth: `${diagramWidth}px`,
+            }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
+      </div>
     </div>
   )
 }

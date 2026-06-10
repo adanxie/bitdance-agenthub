@@ -16,6 +16,7 @@ interface RouteContext {
  *  - web_app  → ZIP 含所有源码文件，文件名 `<title>-v<version>.zip`
  *  - document → 单 Markdown 文件 `<title>-v<version>.md`
  *  - image    → 302 跳转到 image.url（外部图片）
+ *  - diagram  → Mermaid 源码 `<title>-v<version>.mmd`
  *  - ppt      → pptxgenjs 生成真 .pptx 二进制；mode=visual 预留给图片型高保真导出
  *  - code_file / diff / 其它 → JSON dump
  */
@@ -70,6 +71,15 @@ export async function GET(req: Request, ctx: RouteContext) {
   if (content.type === 'image') {
     // 外部 URL：直接 302 让浏览器走原 URL
     return NextResponse.redirect(content.url, 302)
+  }
+
+  if (content.type === 'diagram') {
+    return new NextResponse(content.source, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(baseName)}.mmd"`,
+      },
+    })
   }
 
   if (content.type === 'ppt') {

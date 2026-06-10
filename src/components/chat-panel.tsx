@@ -260,7 +260,7 @@ export function ChatPanel() {
               <Layers className="size-4 text-muted-foreground" />
               会话产物
             </DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogDescription className="truncate text-xs" title={conv.title}>
               {conv.title}
             </DialogDescription>
           </DialogHeader>

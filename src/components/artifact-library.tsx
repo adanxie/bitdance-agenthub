@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { deleteArtifact, fetchArtifact, fetchArtifacts, type ArtifactListItem } from '@/lib/api'
+import { groupArtifactVersions } from '@/lib/artifact-groups'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 
@@ -40,6 +41,8 @@ export function ArtifactLibrary({
 
   const upsertArtifact = useAppStore((s) => s.upsertArtifact)
   const openArtifactPreview = useAppStore((s) => s.openArtifactPreview)
+  const previewArtifactId = useAppStore((s) => s.previewArtifactId)
+  const artifactsById = useAppStore((s) => s.artifacts)
   const removeArtifact = useAppStore((s) => s.removeArtifact)
 
   const refresh = async () => {
@@ -58,17 +61,31 @@ export function ArtifactLibrary({
     void refresh()
   }, [])
 
-  const filtered = useMemo(() => {
+  const scopedItems = useMemo(
+    () => (conversationId ? items.filter((a) => a.conversationId === conversationId) : items),
+    [conversationId, items],
+  )
+
+  const grouped = useMemo(() => groupArtifactVersions(scopedItems), [scopedItems])
+
+  const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const scoped = conversationId ? items.filter((a) => a.conversationId === conversationId) : items
-    if (!q) return scoped
-    return scoped.filter((a) => {
-      const hay = `${a.title} ${a.type} ${a.conversationTitle ?? ''}`.toLowerCase()
-      return hay.includes(q)
+    if (!q) return grouped
+    return grouped.filter((group) => {
+      return group.versions.some((a) => {
+        const hay = `${a.title} ${a.type} v${a.version} ${a.conversationTitle ?? ''}`.toLowerCase()
+        return hay.includes(q)
+      })
     })
-  }, [conversationId, items, query])
+  }, [grouped, query])
 
   const openPreview = async (id: string) => {
+    if (previewArtifactId === id) return
+    if (artifactsById[id]) {
+      openArtifactPreview(id)
+      return
+    }
+
     setPendingPreviewId(id)
     try {
       const full = await fetchArtifact(id)
@@ -99,7 +116,7 @@ export function ArtifactLibrary({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* 搜索 */}
       <div className="shrink-0 px-3 pt-3 pb-2">
         <div className="relative">
@@ -112,66 +129,110 @@ export function ArtifactLibrary({
           />
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">
-          {loading ? '加载中…' : `共 ${filtered.length} 个`}
+          {loading ? '加载中…' : `共 ${filteredGroups.length} 组 / ${scopedItems.length} 个版本`}
         </div>
       </div>
 
       {/* 列表 */}
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-1 px-2 pb-2">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
+        <div className="min-w-0 space-y-1 overflow-hidden px-2 pb-2">
           {loading && items.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
               <Loader2 className="mr-2 size-3 animate-spin" /> 加载中
             </div>
-          ) : filtered.length === 0 ? (
+          ) : filteredGroups.length === 0 ? (
             <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-              {items.length === 0 || !query.trim() ? '还没有产物' : '没有匹配项'}
+              {scopedItems.length === 0 || !query.trim() ? '还没有产物' : '没有匹配项'}
             </div>
           ) : (
-            filtered.map((a) => {
-              const isPending = pendingPreviewId === a.id
+            filteredGroups.map((group) => {
+              const latest = group.latest
+              const versions = group.versions
+              const pendingVersionId = versions.some((a) => pendingPreviewId === a.id)
+                ? pendingPreviewId
+                : null
+              const previewVersionId = versions.some((a) => previewArtifactId === a.id)
+                ? previewArtifactId
+                : null
+              const selectedVersionId = pendingVersionId ?? previewVersionId ?? latest.id
               return (
                 <div
-                  key={a.id}
-                  className="group flex w-full items-start gap-2 rounded-md px-2 py-2 transition hover:bg-accent"
+                  key={group.rootId}
+                  className="group min-w-0 overflow-hidden rounded-md px-2 py-2 transition hover:bg-accent"
                 >
-                  <button
-                    type="button"
-                    onClick={() => void openPreview(a.id)}
-                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
-                    disabled={isPending}
-                  >
-                    <TypeIcon type={a.type} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-xs font-medium">{a.title}</span>
-                        {isPending && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
-                      </div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">
-                        <span className="font-mono">{a.type}</span>
-                        <span className="mx-1">·</span>
-                        {formatTime(a.createdAt)}
-                      </div>
-                      {showConversationTitle && (
-                        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                          {a.conversationTitle ?? '（无会话）'}
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void openPreview(latest.id)}
+                      className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2 overflow-hidden text-left"
+                      disabled={pendingPreviewId === latest.id}
+                    >
+                      <TypeIcon type={latest.type} />
+                      <div className="min-w-0 overflow-hidden">
+                        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 overflow-hidden">
+                          <span className="block min-w-0 truncate text-xs font-medium" title={latest.title}>
+                            {latest.title}
+                          </span>
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                            v{latest.version}
+                          </span>
                         </div>
+                        <div className="mt-0.5 min-w-0 truncate text-[10px] text-muted-foreground">
+                          <span className="font-mono">{latest.type}</span>
+                          <span className="mx-1">·</span>
+                          {versions.length > 1 ? `${versions.length} 个版本` : '1 个版本'}
+                          <span className="mx-1">·</span>
+                          {formatTime(latest.createdAt)}
+                        </div>
+                        {showConversationTitle && (
+                          <div className="mt-0.5 min-w-0 truncate text-[10px] text-muted-foreground">
+                            {latest.conversationTitle ?? '（无会话）'}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeleteTargetId(latest.id)
+                      }}
+                      title="删除最新版本"
+                      className={cn(
+                        'shrink-0 self-center opacity-0 transition group-hover:opacity-100 hover:text-red-600',
                       )}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+
+                  {versions.length > 1 && (
+                    <div className="ml-6 mt-1 flex min-w-0 flex-wrap gap-1">
+                      {versions.map((version) => {
+                        const isVersionPending = pendingPreviewId === version.id
+                        const isSelected = version.id === selectedVersionId
+                        return (
+                          <button
+                            key={version.id}
+                            type="button"
+                            onClick={() => void openPreview(version.id)}
+                            disabled={isVersionPending}
+                            aria-pressed={isSelected}
+                            title={`${version.title} · ${formatTime(version.createdAt)}`}
+                            className={cn(
+                              'inline-flex h-5 shrink-0 items-center gap-1 rounded border px-1.5 font-mono text-[10px] transition',
+                              isSelected
+                                ? 'border-primary/30 bg-primary/10 text-foreground'
+                                : 'border-border/70 bg-background/60 text-muted-foreground hover:border-foreground/25 hover:text-foreground',
+                            )}
+                          >
+                            {isVersionPending && <Loader2 className="size-2.5 animate-spin" />}
+                            v{version.version}
+                          </button>
+                        )
+                      })}
                     </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDeleteTargetId(a.id)
-                    }}
-                    title="删除产物"
-                    className={cn(
-                      'shrink-0 self-center opacity-0 transition group-hover:opacity-100 hover:text-red-600',
-                    )}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  )}
                 </div>
               )
             })
@@ -185,7 +246,9 @@ export function ArtifactLibrary({
           <DialogHeader>
             <DialogTitle>删除产物</DialogTitle>
             <DialogDescription>
-              确定删除「{deleteTarget?.title}」吗？聊天里指向该产物的卡片将不再可预览。该操作不可恢复。
+              {deleteTarget
+                ? `确定删除「${deleteTarget.title}」v${deleteTarget.version} 吗？聊天里指向该版本的卡片将不再可预览。该操作不可恢复。`
+                : '确定删除这个产物版本吗？该操作不可恢复。'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

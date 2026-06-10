@@ -35,8 +35,8 @@ export type PartDelta =
   | { type: 'thinking.append'; text: string }
 
 // ─── Artifact 内容（联合）─────────────────────────────────
-export type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image' | 'ppt'
-export type WritableArtifactType = Extract<ArtifactType, 'web_app' | 'document' | 'image' | 'ppt'>
+export type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image' | 'ppt' | 'diagram'
+export type WritableArtifactType = Extract<ArtifactType, 'web_app' | 'document' | 'image' | 'ppt' | 'diagram'>
 
 export type ArtifactContent =
   | {
@@ -70,11 +70,19 @@ export type ArtifactContent =
       height?: number
     }
   | {
+      type: 'diagram'
+      syntax: 'mermaid'
+      source: string
+      theme?: MermaidTheme
+    }
+  | {
       type: 'ppt'
       title?: string
       theme?: PptTheme
       slides: PptSlide[]
     }
+
+export type MermaidTheme = 'default' | 'base' | 'dark' | 'forest' | 'neutral'
 
 export type PptLayout =
   | 'title'

@@ -24,6 +24,7 @@ const WRITABLE_ARTIFACT_TYPES = new Set<WritableArtifactType>([
   'document',
   'image',
   'ppt',
+  'diagram',
 ])
 
 export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
@@ -304,9 +305,9 @@ export function taskExpectsArtifact(task: DispatchPlanItem): boolean {
   const text = task.task
   return (
     getProducedArtifactTopics(text).size > 0 ||
-    /(?:输出|产出|写入|生成|创建|保存).{0,40}(?:artifact|artifacts|产物|document|web_app|web app|diff|code_file|markdown|文档|报告|网页|应用|代码|PRD|设计)/i.test(text) ||
-    /(?:artifact|artifacts|产物|document|web_app|web app|diff|code_file|markdown|文档|报告|网页|应用|代码|PRD|设计).{0,40}(?:输出|产出|写入|生成|创建|保存)/i.test(text) ||
-    /(?:类型为|type\s*[:=]).{0,24}(?:document|web_app|web app|diff|code_file|image|markdown)/i.test(text) ||
+    /(?:输出|产出|写入|生成|创建|保存).{0,40}(?:artifact|artifacts|产物|document|web_app|web app|diagram|mermaid|diff|code_file|markdown|文档|报告|网页|应用|代码|PRD|设计|图)/i.test(text) ||
+    /(?:artifact|artifacts|产物|document|web_app|web app|diagram|mermaid|diff|code_file|markdown|文档|报告|网页|应用|代码|PRD|设计|图).{0,40}(?:输出|产出|写入|生成|创建|保存)/i.test(text) ||
+    /(?:类型为|type\s*[:=]).{0,24}(?:document|web_app|web app|diagram|diff|code_file|image|markdown)/i.test(text) ||
     /title\s*(?:为|:|=)/i.test(text)
   )
 }
