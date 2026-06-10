@@ -19,6 +19,27 @@ Instead of treating every agent run as an isolated terminal transcript, AgentHub
 
 > Current status: active local development. The app is usable as a web app and Electron desktop app; the mobile companion app is under development.
 
+## Contents
+
+- [Why AgentHub](#why-agenthub)
+- [Features](#features)
+  - [IM-style agent workspace](#im-style-agent-workspace)
+  - [Multi-agent support](#multi-agent-support)
+  - [Orchestrator and task dispatch](#orchestrator-and-task-dispatch)
+  - [Artifacts and deployment previews](#artifacts-and-deployment-previews)
+- [Tech Stack](#tech-stack)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Desktop App](#desktop-app)
+  - [Specify Electron build platform](#specify-electron-build-platform)
+  - [SQLite ABI notes](#sqlite-abi-notes)
+- [Mobile Companion](#mobile-companion)
+- [Common Commands](#common-commands)
+- [Architecture](#architecture)
+- [Security Model](#security-model)
+- [Known Limits](#known-limits)
+- [Contributing](#contributing)
+
 ---
 
 ## Why AgentHub
