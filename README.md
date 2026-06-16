@@ -377,4 +377,4 @@ When changing entities, stream events, tools, adapters, persistence, platform be
 
 ## License
 
-Learning / research project. Add a formal license before publishing releases for broad external use.
+AGPL-3.0-only. See [LICENSE](./LICENSE).
