@@ -305,4 +305,124 @@ describe('evaluateTaskResultReport', () => {
       ),
     ).toEqual({ ok: true })
   })
+
+  it('fails code tasks without successful runnable verification command evidence', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ task: 'Implement the frontend app', taskKind: 'code' }),
+        {
+          status: 'complete',
+          summary: 'Implemented the app.',
+        },
+        {
+          fileWrites: [
+            {
+              path: 'frontend/src/App.tsx',
+              absolutePath: 'E:/repo/frontend/src/App.tsx',
+              bytes: 123,
+              applied: 'auto',
+            },
+          ],
+          commands: [],
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error:
+        'Task "t1" is missing successful runnable verification command evidence: build/compile/test/typecheck/lint command exitCode=0',
+    })
+  })
+
+  it('does not count prepare commands as runnable verification', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ task: 'Implement the frontend app', taskKind: 'code' }),
+        {
+          status: 'complete',
+          summary: 'Dependencies installed and app implemented.',
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'pnpm install',
+              cwd: 'E:/repo/frontend',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+              prepare: true,
+            },
+          ],
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error:
+        'Task "t1" is missing successful runnable verification command evidence: build/compile/test/typecheck/lint command exitCode=0',
+    })
+  })
+
+  it('accepts code tasks with successful build command evidence', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ task: 'Implement the frontend app', taskKind: 'code' }),
+        {
+          status: 'complete',
+          summary: 'Build passes.',
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'pnpm build',
+              cwd: 'E:/repo/frontend',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({ ok: true })
+  })
+
+  it('does not count unrelated successful commands as runnable verification', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ task: 'Implement the frontend app', taskKind: 'code' }),
+        {
+          status: 'complete',
+          summary: 'Listed files.',
+        },
+        {
+          fileWrites: [],
+          commands: [
+            {
+              command: 'ls',
+              cwd: 'E:/repo/frontend',
+              exitCode: 0,
+              timedOut: false,
+              isError: false,
+            },
+          ],
+        },
+      ),
+    ).toEqual({
+      ok: false,
+      error:
+        'Task "t1" is missing successful runnable verification command evidence: build/compile/test/typecheck/lint command exitCode=0',
+    })
+  })
+
+  it('allows non-code review tasks to complete without runnable verification', () => {
+    expect(
+      evaluateTaskResultReport(
+        task({ task: 'Review the implementation', taskKind: 'review' }),
+        {
+          status: 'complete',
+          summary: 'Reviewed the implementation.',
+        },
+      ),
+    ).toEqual({ ok: true })
+  })
 })

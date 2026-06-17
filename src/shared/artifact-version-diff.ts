@@ -78,6 +78,20 @@ export function buildArtifactVersionDiff(
         ],
       }
     }
+    case 'project': {
+      const next = newContent as Extract<ArtifactContent, { type: 'project' }>
+      return {
+        status: 'ready',
+        sections: [
+          {
+            key: 'files',
+            title: 'project files',
+            oldText: projectMetadata(oldContent),
+            newText: projectMetadata(next),
+          },
+        ],
+      }
+    }
     case 'image':
       return { status: 'unsupported', reason: 'Image artifacts do not have stored text content to compare.' }
     case 'diff':
@@ -122,6 +136,17 @@ function codeFileMetadata(content: Extract<ArtifactContent, { type: 'code_file' 
     `language: ${content.language}`,
     `sizeBytes: ${content.sizeBytes}`,
     `checksum: ${content.checksum}`,
+  ].join('\n')
+}
+
+function projectMetadata(content: Extract<ArtifactContent, { type: 'project' }>): string {
+  const files = [...content.files].sort((a, b) => a.path.localeCompare(b.path))
+  return [
+    `agentId: ${content.agentId ?? '-'}`,
+    `taskId: ${content.taskId ?? '-'}`,
+    `files: ${files.length}`,
+    '',
+    ...files.map((file) => `${file.path}\t${file.sizeBytes}`),
   ].join('\n')
 }
 

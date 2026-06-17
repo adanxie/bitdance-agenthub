@@ -1,12 +1,13 @@
 'use client'
 
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, FolderGit2, FolderTree, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X, ZoomIn, ZoomOut } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 
 import { buildDiffStyles } from '@/components/diff-viewer-styles'
+import { getFileIcon } from '@/components/file-explorer-panel'
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -181,7 +182,17 @@ export function ArtifactPreviewPanel() {
           <a
             href={`/api/artifacts/${artifact.id}/export`}
             download
-            title={`下载${artifact.type === 'web_app' ? ' .zip' : artifact.type === 'document' ? ' .md' : artifact.type === 'diagram' ? ' .mmd' : artifact.type === 'ppt' ? '可编辑 .pptx' : ''}`}
+            title={`下载${
+              artifact.type === 'web_app' || artifact.type === 'project'
+                ? ' .zip'
+                : artifact.type === 'document'
+                  ? ' .md'
+                  : artifact.type === 'diagram'
+                    ? ' .mmd'
+                    : artifact.type === 'ppt'
+                      ? '可编辑 .pptx'
+                      : ''
+            }`}
             className="inline-flex size-8 items-center justify-center rounded-lg text-foreground/70 transition hover:bg-muted hover:text-foreground"
           >
             <Download className="size-4" />
@@ -288,6 +299,8 @@ function ArtifactView({
           onSaveVersion={onSaveVersion}
         />,
       )
+    case 'project':
+      return wrap(<ProjectView conversationId={artifact.conversationId} content={content} />)
     case 'diff':
       return wrap(<DiffArtifactView content={content} />)
     case 'ppt':
@@ -1309,6 +1322,259 @@ function CodeFileView({
   )
 }
 
+type ProjectArtifactContent = Extract<ArtifactContent, { type: 'project' }>
+type ProjectFileEntry = ProjectArtifactContent['files'][number]
+
+interface ProjectTreeNode {
+  name: string
+  path: string
+  children: ProjectTreeNode[]
+  file?: ProjectFileEntry
+}
+
+function ProjectView({
+  conversationId,
+  content,
+}: {
+  conversationId: string
+  content: ProjectArtifactContent
+}) {
+  const [activePath, setActivePath] = useState<string | null>(content.files[0]?.path ?? null)
+  const [fileContent, setFileContent] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [truncated, setTruncated] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const tree = useMemo(() => buildProjectTree(content.files), [content.files])
+  const activeFile = useMemo(
+    () => content.files.find((file) => file.path === activePath) ?? null,
+    [activePath, content.files],
+  )
+  const totalBytes = useMemo(
+    () => content.files.reduce((sum, file) => sum + file.sizeBytes, 0),
+    [content.files],
+  )
+
+  useEffect(() => {
+    const firstPath = content.files[0]?.path ?? null
+    setActivePath((current) =>
+      current && content.files.some((file) => file.path === current) ? current : firstPath,
+    )
+  }, [content.files])
+
+  useEffect(() => {
+    if (!activePath) {
+      setFileContent('')
+      setTruncated(false)
+      setError(null)
+      return
+    }
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    workspaceReadFile(conversationId, activePath)
+      .then((result) => {
+        if (cancelled) return
+        setFileContent(result.content)
+        setTruncated(result.truncated)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setFileContent('')
+        setTruncated(false)
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activePath, conversationId])
+
+  if (content.files.length === 0) {
+    return <Empty>该项目产物没有记录到 workspace 写入文件</Empty>
+  }
+
+  const activeName = activePath?.split('/').pop() ?? null
+  const iconSpec = activeName ? getFileIcon(activeName) : null
+  const ActiveIcon = iconSpec?.Icon
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <aside className="flex w-72 shrink-0 flex-col border-r bg-muted/10">
+        <div className="shrink-0 border-b px-3 py-2">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <FolderGit2 className="size-4 text-muted-foreground" />
+            <span>项目文件</span>
+          </div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {content.files.length} 个文件 · {formatBytes(totalBytes)}
+          </div>
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="p-2">
+            {tree.children.map((node) => (
+              <ProjectTreeNodeRow
+                key={node.path || node.name}
+                node={node}
+                depth={0}
+                activePath={activePath}
+                onSelect={setActivePath}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+      </aside>
+
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
+          {ActiveIcon ? (
+            <ActiveIcon className={cn('size-4 shrink-0', iconSpec?.cls)} />
+          ) : (
+            <FileCode className="size-4 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1 truncate font-mono">{activePath}</span>
+          {activeFile && (
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {formatBytes(activeFile.sizeBytes)}
+            </span>
+          )}
+          {truncated && (
+            <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400">
+              已截断
+            </span>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1">
+          {loading ? (
+            <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
+              <Loader2 className="mr-2 size-4 animate-spin" />
+              读取文件中
+            </div>
+          ) : error ? (
+            <div className="flex size-full items-center justify-center p-6 text-center text-sm text-destructive">
+              <div>
+                <AlertCircle className="mx-auto mb-2 size-5" />
+                <div>{error}</div>
+              </div>
+            </div>
+          ) : activePath ? (
+            <ArtifactCodeEditor
+              value={fileContent}
+              onChange={setFileContent}
+              filename={activePath}
+              type="project"
+              readOnly
+            />
+          ) : (
+            <Empty>请选择一个文件</Empty>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ProjectTreeNodeRow({
+  node,
+  depth,
+  activePath,
+  onSelect,
+}: {
+  node: ProjectTreeNode
+  depth: number
+  activePath: string | null
+  onSelect: (path: string) => void
+}) {
+  const [expanded, setExpanded] = useState(depth < 2)
+  const isFile = Boolean(node.file)
+  const iconSpec = isFile ? getFileIcon(node.name) : { Icon: FolderTree, cls: 'text-amber-500' }
+  const Icon = iconSpec.Icon
+  const selected = isFile && node.file?.path === activePath
+
+  return (
+    <div>
+      <button
+        type="button"
+        className={cn(
+          'flex h-7 w-full items-center gap-1.5 rounded px-1.5 text-left text-xs transition',
+          selected ? 'bg-primary/10 text-primary' : 'text-foreground/80 hover:bg-muted',
+        )}
+        style={{ paddingLeft: 6 + depth * 12 }}
+        onClick={() => {
+          if (isFile && node.file) onSelect(node.file.path)
+          else setExpanded((value) => !value)
+        }}
+        title={node.path}
+      >
+        {isFile ? (
+          <span className="size-3.5 shrink-0" />
+        ) : expanded ? (
+          <ChevronRight className="size-3.5 shrink-0 rotate-90 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <Icon className={cn('size-3.5 shrink-0', iconSpec.cls)} />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {node.file && (
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            {formatBytes(node.file.sizeBytes)}
+          </span>
+        )}
+      </button>
+      {!isFile && expanded && (
+        <div>
+          {node.children.map((child) => (
+            <ProjectTreeNodeRow
+              key={child.path || child.name}
+              node={child}
+              depth={depth + 1}
+              activePath={activePath}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildProjectTree(files: readonly ProjectFileEntry[]): ProjectTreeNode {
+  const root: ProjectTreeNode = { name: '', path: '', children: [] }
+  for (const file of files) {
+    const parts = file.path.split('/').filter(Boolean)
+    let cursor = root
+    for (let index = 0; index < parts.length; index++) {
+      const name = parts[index]
+      const nodePath = parts.slice(0, index + 1).join('/')
+      const leaf = index === parts.length - 1
+      let next = cursor.children.find((child) => child.name === name)
+      if (!next) {
+        next = { name, path: nodePath, children: [] }
+        cursor.children.push(next)
+      }
+      if (leaf) next.file = file
+      cursor = next
+    }
+  }
+  sortProjectTree(root)
+  return root
+}
+
+function sortProjectTree(node: ProjectTreeNode): void {
+  node.children.sort((a, b) => {
+    const aFile = Boolean(a.file)
+    const bFile = Boolean(b.file)
+    if (aFile !== bFile) return aFile ? 1 : -1
+    return a.name.localeCompare(b.name)
+  })
+  for (const child of node.children) sortProjectTree(child)
+}
+
 // ─── version compare ──────────────────────────────────
 function VersionCompareView({
   versions,
@@ -1528,7 +1794,20 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'code_file') return <FileCode className="size-4 text-muted-foreground" />
   if (type === 'diff') return <GitCompare className="size-4 text-muted-foreground" />
   if (type === 'ppt') return <Presentation className="size-4 text-muted-foreground" />
+  if (type === 'project') return <FolderGit2 className="size-4 text-muted-foreground" />
   return <Layers className="size-4 text-muted-foreground" />
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`
 }
 
 function openPreviewInNewTab(artifactId: string): void {

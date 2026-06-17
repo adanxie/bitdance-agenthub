@@ -22,7 +22,7 @@ const TaskSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1),
-        type: z.enum(['web_app', 'document', 'image', 'ppt']),
+        type: z.enum(['web_app', 'document', 'image', 'ppt', 'project']),
         required: z.boolean().optional(),
         description: z.string().optional(),
       }),
@@ -104,7 +104,7 @@ export const planTasksTool: ToolDef = {
             expectedOutputs: {
               type: 'array',
               description:
-                'Only artifacts this task must create for downstream handoff or user inspection. Omit for text-only work such as review, validation, diagnosis, status check, explanation, or summary. The child agent must pass the same id as write_artifact.outputKey.',
+                'Artifacts this task must create for downstream handoff or user inspection. Code implementation tasks should declare a required project output. Omit for text-only work such as review, validation, diagnosis, status check, explanation, or summary.',
               items: {
                 type: 'object',
                 required: ['id', 'type'],
@@ -115,13 +115,14 @@ export const planTasksTool: ToolDef = {
                   },
                   type: {
                     type: 'string',
-                    enum: ['web_app', 'document', 'image', 'ppt'],
-                    description: 'Expected artifact type.',
+                    enum: ['web_app', 'document', 'image', 'ppt', 'project'],
+                    description:
+                      'Expected artifact type. Use project for workspace code trees; project is created by AgentHub from fs_write evidence, not by write_artifact.',
                   },
                   required: {
                     type: 'boolean',
                     description:
-                      'Whether this handoff output is expected by the plan. Defaults to true. This is not a hard task-completion gate; task completion is reported through report_task_result.',
+                      'Whether this handoff output is expected by the plan. Defaults to true. Required project outputs on code tasks are hard completion gates.',
                   },
                   description: {
                     type: 'string',

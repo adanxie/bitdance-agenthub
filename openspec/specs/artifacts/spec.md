@@ -61,6 +61,26 @@ PPT artifact content MUST NOT store large binary slide assets directly in the JS
 - **THEN** the artifact content stores a safe reference rather than raw unbounded binary bytes
 - **AND** preview/export code resolves the asset through existing safe artifact, attachment, or workspace access paths.
 
+### Requirement: Workspace code trees SHALL be represented as project artifacts
+
+When an agent run successfully writes files into a conversation workspace through approved `fs_write` evidence, the system SHALL create a `project` artifact that stores only a relative file list and provenance metadata while keeping file bodies in the workspace filesystem.
+
+#### Scenario: Sub-agent writes a multi-file project
+- **WHEN** a completed dispatch child run has one or more applied file writes inside the workspace
+- **THEN** the system creates a `project` artifact for that task
+- **AND** publishes an `artifact.create` event for the artifact
+- **AND** does not append an `artifact_ref` message part solely for that system-created project.
+
+#### Scenario: User previews a project artifact
+- **WHEN** a user opens a `project` artifact
+- **THEN** the preview panel shows a file tree based on the stored file list
+- **AND** file contents are loaded from the conversation workspace on demand.
+
+#### Scenario: User exports a project artifact
+- **WHEN** a user downloads a `project` artifact
+- **THEN** the export route returns a ZIP assembled from files still present inside the workspace effective cwd
+- **AND** paths outside the workspace are excluded.
+
 ### Requirement: Web app preview SHALL be addressable
 
 Each `web_app` artifact MUST have an HTTP preview route that renders the same HTML package used by the preview panel under sandboxing headers.

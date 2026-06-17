@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, Image as ImageIcon, Layers, Loader2, Presentation, Search, Trash2 } from 'lucide-react'
+import { FileText, FolderGit2, Image as ImageIcon, Layers, Loader2, Presentation, Search, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -44,6 +44,8 @@ export function ArtifactLibrary({
   const previewArtifactId = useAppStore((s) => s.previewArtifactId)
   const artifactsById = useAppStore((s) => s.artifacts)
   const removeArtifact = useAppStore((s) => s.removeArtifact)
+  const storeArtifacts = useAppStore((s) => s.artifacts)
+  const conversations = useAppStore((s) => s.conversations)
 
   const refresh = async () => {
     setLoading(true)
@@ -61,9 +63,30 @@ export function ArtifactLibrary({
     void refresh()
   }, [])
 
+  const mergedItems = useMemo(() => {
+    const byId = new Map<string, ArtifactListItem>()
+    for (const item of items) byId.set(item.id, item)
+    for (const artifact of Object.values(storeArtifacts)) {
+      const existing = byId.get(artifact.id)
+      byId.set(artifact.id, {
+        id: artifact.id,
+        conversationId: artifact.conversationId,
+        conversationTitle:
+          conversations[artifact.conversationId]?.title ?? existing?.conversationTitle ?? null,
+        type: artifact.type,
+        title: artifact.title,
+        version: artifact.version,
+        parentArtifactId: artifact.parentArtifactId ?? existing?.parentArtifactId ?? null,
+        createdByAgentId: artifact.createdByAgentId,
+        createdAt: artifact.createdAt,
+      })
+    }
+    return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
+  }, [conversations, items, storeArtifacts])
+
   const scopedItems = useMemo(
-    () => (conversationId ? items.filter((a) => a.conversationId === conversationId) : items),
-    [conversationId, items],
+    () => (conversationId ? mergedItems.filter((a) => a.conversationId === conversationId) : mergedItems),
+    [conversationId, mergedItems],
   )
 
   const grouped = useMemo(() => groupArtifactVersions(scopedItems), [scopedItems])
@@ -98,7 +121,7 @@ export function ArtifactLibrary({
     }
   }
 
-  const deleteTarget = deleteTargetId ? items.find((a) => a.id === deleteTargetId) : null
+  const deleteTarget = deleteTargetId ? mergedItems.find((a) => a.id === deleteTargetId) : null
 
   const confirmDelete = async () => {
     if (!deleteTargetId) return
@@ -136,7 +159,7 @@ export function ArtifactLibrary({
       {/* 列表 */}
       <ScrollArea className="min-h-0 min-w-0 flex-1">
         <div className="min-w-0 space-y-1 overflow-hidden px-2 pb-2">
-          {loading && items.length === 0 ? (
+          {loading && mergedItems.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
               <Loader2 className="mr-2 size-3 animate-spin" /> 加载中
             </div>
@@ -274,6 +297,7 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'image') return <ImageIcon className={className} />
   if (type === 'document') return <FileText className={className} />
   if (type === 'ppt') return <Presentation className={className} />
+  if (type === 'project') return <FolderGit2 className={className} />
   return <Layers className={className} />
 }
 

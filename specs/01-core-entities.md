@@ -133,12 +133,13 @@ interface Artifact {
   createdAt: number
 }
 
-type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image'
+type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image' | 'ppt' | 'project'
 ```
 
 **存储策略**（详见 Spec 04）：
-- `web_app` / `diff` / `document` / `image` 的 content 存 DB
+- `web_app` / `diff` / `document` / `image` / `ppt` 的 content 存 DB
 - `code_file` 的 content 仅记 workspace 内相对路径，文件本体在 workspace 磁盘
+- `project` 的 content 仅记 workspace 内相对文件清单，文件本体在 workspace 磁盘
 
 **约束**：
 - 「修改一个 artifact」 = 创建新 Artifact 记录，`parentArtifactId` 指向旧版本，`version` 递增（**当前未实装写入新版本的工具/UI 路径**，详见 Spec 04 「版本链 TODO」）

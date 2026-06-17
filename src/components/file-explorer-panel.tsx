@@ -412,7 +412,7 @@ const NAME_ICON: Record<string, FileIconSpec> = {
 const DEFAULT_FILE_ICON: FileIconSpec = { Icon: File, cls: 'text-muted-foreground' }
 
 // 根据文件名挑选图标：完整文件名 > 特例前缀 > 扩展名 > 默认
-function getFileIcon(name: string): FileIconSpec {
+export function getFileIcon(name: string): FileIconSpec {
   const lower = name.toLowerCase()
   if (NAME_ICON[lower]) return NAME_ICON[lower]
   if (lower.startsWith('readme')) return { Icon: BookOpen, cls: 'text-sky-500' }

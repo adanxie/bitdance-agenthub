@@ -13,8 +13,66 @@ const token = requireEnv('AGENTHUB_INTERNAL_TOOL_TOKEN')
 const conversationId = requireEnv('AGENTHUB_CONVERSATION_ID')
 const agentId = requireEnv('AGENTHUB_AGENT_ID')
 const runId = requireEnv('AGENTHUB_RUN_ID')
+const allowedTools = parseAllowedTools(process.env.AGENTHUB_ALLOWED_TOOLS)
 
-server.registerTool(
+registerTool(
+  'plan_tasks',
+  {
+    description:
+      'Create the AgentHub Orchestrator dispatch plan. Call this exactly once when the plan is ready; AgentHub will stop the planning stage and execute the plan after user review.',
+    inputSchema: {
+      reasoning: z.string(),
+      tasks: z
+        .array(
+          z.object({
+            id: z.string(),
+            agentId: z.string(),
+            task: z.string(),
+            taskKind: z.enum(['code', 'test', 'review', 'design', 'doc', 'analysis']).optional(),
+            dependsOn: z.array(z.string()).optional(),
+            expectedOutputs: z
+              .array(
+                z.object({
+                  id: z.string(),
+                  type: z.enum(['web_app', 'document', 'image', 'ppt', 'project']),
+                  required: z.boolean().optional(),
+                  description: z.string().optional(),
+                }),
+              )
+              .optional(),
+            inputs: z
+              .array(
+                z.object({
+                  fromTaskId: z.string(),
+                  outputId: z.string(),
+                  required: z.boolean().optional(),
+                  description: z.string().optional(),
+                }),
+              )
+              .optional(),
+            acceptanceCriteria: z.array(z.string()).optional(),
+            targetPaths: z.array(z.string()).optional(),
+            expectedWorkspaceChanges: z.array(z.string()).optional(),
+            requiredCommands: z
+              .array(
+                z.object({
+                  command: z.string(),
+                  description: z.string().optional(),
+                  cwd: z.string().optional(),
+                  timeoutMs: z.number().int().positive().optional(),
+                }),
+              )
+              .optional(),
+            requiredEvidence: z.array(z.string()).optional(),
+          }),
+        )
+        .min(1),
+    },
+  },
+  async (args) => callAgentHubTool('plan_tasks', args),
+)
+
+registerTool(
   'write_artifact',
   {
     description:
@@ -37,7 +95,7 @@ server.registerTool(
   async (args) => callAgentHubTool('write_artifact', args),
 )
 
-server.registerTool(
+registerTool(
   'read_artifact',
   {
     description: 'Read the full content of an existing AgentHub artifact by id.',
@@ -48,7 +106,19 @@ server.registerTool(
   async (args) => callAgentHubTool('read_artifact', args),
 )
 
-server.registerTool(
+registerTool(
+  'read_attachment',
+  {
+    description:
+      'Read a user-uploaded attachment in the current conversation by attachmentId. Use this when planning depends on uploaded file contents.',
+    inputSchema: {
+      attachmentId: z.string(),
+    },
+  },
+  async (args) => callAgentHubTool('read_attachment', args),
+)
+
+registerTool(
   'fs_list',
   {
     description:
@@ -60,7 +130,7 @@ server.registerTool(
   async (args) => callAgentHubTool('fs_list', args),
 )
 
-server.registerTool(
+registerTool(
   'deploy_artifact',
   {
     description:
@@ -72,7 +142,7 @@ server.registerTool(
   async (args) => callAgentHubTool('deploy_artifact', args),
 )
 
-server.registerTool(
+registerTool(
   'deploy_workspace',
   {
     description:
@@ -86,7 +156,7 @@ server.registerTool(
   async (args) => callAgentHubTool('deploy_workspace', args),
 )
 
-server.registerTool(
+registerTool(
   'ask_user',
   {
     description:
@@ -117,7 +187,7 @@ server.registerTool(
   async (args) => callAgentHubTool('ask_user', args),
 )
 
-server.registerTool(
+registerTool(
   'report_task_result',
   {
     description:
@@ -213,6 +283,21 @@ function requireEnv(name) {
     process.exit(1)
   }
   return value
+}
+
+function parseAllowedTools(value) {
+  if (!value) return null
+  const tools = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return tools.length > 0 ? new Set(tools) : null
+}
+
+function registerTool(name, config, handler) {
+  if (name === 'plan_tasks' && !allowedTools?.has(name)) return
+  if (allowedTools && !allowedTools.has(name)) return
+  server.registerTool(name, config, handler)
 }
 
 const transport = new StdioServerTransport()

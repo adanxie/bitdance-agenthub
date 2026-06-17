@@ -1,7 +1,9 @@
 import path from 'node:path'
+import { statSync } from 'node:fs'
 
 import {
   Codex,
+  type FileChangeItem,
   type ApprovalMode,
   type Input as CodexInput,
   type SandboxMode,
@@ -13,8 +15,10 @@ import {
 import { eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
+import { recordRunFileWrite } from '@/server/dispatch-run-evidence'
 import { getInternalToolToken } from '@/server/internal-tool-auth'
 import { newMessageId, newToolCallId } from '@/server/ids'
+import { isPathWithin } from '@/server/workspace-utils'
 import {
   codexResponsesCompatibilityError,
   isCodexResponsesMissingErrorMessage,
@@ -31,6 +35,14 @@ import { adapterSessionKey, codexSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
 const DEFAULT_MODEL = 'gpt-5-codex'
+const PLAN_TASKS_TOOL_NAME = 'plan_tasks'
+const CODEX_PLAN_STAGE_AGENTHUB_TOOLS = [
+  PLAN_TASKS_TOOL_NAME,
+  'ask_user',
+  'fs_list',
+  'read_artifact',
+  'read_attachment',
+]
 
 export class CodexAdapter implements AgentPlatformAdapter {
   readonly name = 'codex' as const
@@ -53,7 +65,9 @@ export class CodexAdapter implements AgentPlatformAdapter {
       where: eq(schema.conversations.id, input.conversationId),
     })
     const approvalMode = conv?.fsWriteApprovalMode ?? 'review'
-    const sandboxMode: SandboxMode = approvalMode === 'auto' ? 'workspace-write' : 'read-only'
+    const isPlanStage = input.toolNames.includes(PLAN_TASKS_TOOL_NAME)
+    const sandboxMode: SandboxMode =
+      isPlanStage || approvalMode !== 'auto' ? 'read-only' : 'workspace-write'
     const approvalPolicy: ApprovalMode = 'never'
 
     const codexEnv = buildCodexChildProcessEnv()
@@ -62,7 +76,7 @@ export class CodexAdapter implements AgentPlatformAdapter {
       baseUrl: input.apiBaseUrl ?? undefined,
       env: codexEnv,
       config: {
-        developer_instructions: buildCodexDeveloperInstructions(input.systemPrompt),
+        developer_instructions: buildCodexDeveloperInstructions(input.systemPrompt, isPlanStage),
         mcp_servers: {
           agenthub: {
             command: process.execPath,
@@ -130,6 +144,9 @@ export class CodexAdapter implements AgentPlatformAdapter {
         for (const streamEvent of translated.events) {
           yield streamEvent
         }
+        if (event.type === 'item.completed' && event.item.type === 'file_change') {
+          recordCodexFileChangeEvidence(input, event.item)
+        }
         if (event.type === 'item.completed' && event.item.type === 'mcp_tool_call') {
           if (event.item.server === 'agenthub' && event.item.tool === 'write_artifact') {
             const artifactId = parseArtifactIdFromCodexMcpResult(event.item.result)
@@ -166,7 +183,16 @@ export class CodexAdapter implements AgentPlatformAdapter {
   }
 }
 
-function buildCodexDeveloperInstructions(systemPrompt: string): string {
+function buildCodexDeveloperInstructions(systemPrompt: string, isPlanStage: boolean): string {
+  if (isPlanStage) {
+    return [
+      systemPrompt,
+      '',
+      '## AgentHub MCP tools',
+      'You are in the Orchestrator planning stage. Inspect context with fs_list/read_artifact/read_attachment when needed, ask finite blocking questions with ask_user, then call plan_tasks exactly once.',
+      'Do not write files, run commands, deploy, or complete child work in the planning stage. AgentHub will execute the approved plan.',
+    ].join('\n')
+  }
   return [
     systemPrompt,
     '',
@@ -181,10 +207,42 @@ function buildCodexDeveloperInstructions(systemPrompt: string): string {
   ].join('\n')
 }
 
+function recordCodexFileChangeEvidence(input: AdapterInput, item: FileChangeItem): void {
+  if (item.status !== 'completed') return
+
+  for (const change of item.changes) {
+    if (change.kind === 'delete') continue
+    const absolutePath = path.resolve(input.workspacePath, change.path)
+    if (!isPathWithin(absolutePath, input.workspacePath)) continue
+
+    let bytes: number
+    try {
+      bytes = statSync(absolutePath).size
+    } catch {
+      continue
+    }
+
+    recordRunFileWrite(input.runId, {
+      path: toCodexWorkspacePath(change.path, input.workspacePath, absolutePath),
+      absolutePath,
+      bytes,
+      applied: 'auto',
+    })
+  }
+}
+
+function toCodexWorkspacePath(changePath: string, workspacePath: string, absolutePath: string): string {
+  const relativePath = path.isAbsolute(changePath)
+    ? path.relative(workspacePath, absolutePath)
+    : changePath
+  return relativePath.split(path.sep).join('/')
+}
+
 function buildCodexMcpEnv(
   input: AdapterInput,
   baseEnv: Record<string, string>,
 ): Record<string, string> {
+  const allowedTools = getCodexAllowedTools(input)
   return {
     ELECTRON_RUN_AS_NODE: baseEnv.ELECTRON_RUN_AS_NODE ?? process.env.ELECTRON_RUN_AS_NODE ?? '1',
     AGENTHUB_INTERNAL_BASE_URL: getAgentHubInternalBaseUrl(),
@@ -192,7 +250,16 @@ function buildCodexMcpEnv(
     AGENTHUB_CONVERSATION_ID: input.conversationId,
     AGENTHUB_AGENT_ID: input.agentId,
     AGENTHUB_RUN_ID: input.runId,
+    ...(allowedTools ? { AGENTHUB_ALLOWED_TOOLS: allowedTools } : {}),
   }
+}
+
+function getCodexAllowedTools(input: AdapterInput): string | undefined {
+  if (!input.toolNames.includes(PLAN_TASKS_TOOL_NAME)) return undefined
+  const requested = new Set(input.toolNames)
+  return CODEX_PLAN_STAGE_AGENTHUB_TOOLS.filter(
+    (toolName) => toolName === PLAN_TASKS_TOOL_NAME || requested.has(toolName),
+  ).join(',')
 }
 
 function getAgentHubInternalBaseUrl(): string {

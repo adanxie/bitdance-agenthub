@@ -35,8 +35,20 @@ export type PartDelta =
   | { type: 'thinking.append'; text: string }
 
 // ─── Artifact 内容（联合）─────────────────────────────────
-export type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image' | 'ppt' | 'diagram'
-export type WritableArtifactType = Extract<ArtifactType, 'web_app' | 'document' | 'image' | 'ppt' | 'diagram'>
+export type ArtifactType =
+  | 'web_app'
+  | 'code_file'
+  | 'diff'
+  | 'document'
+  | 'image'
+  | 'ppt'
+  | 'diagram'
+  | 'project'
+export type WritableArtifactType = Extract<
+  ArtifactType,
+  'web_app' | 'document' | 'image' | 'ppt' | 'diagram'
+>
+export type DispatchExpectedOutputType = WritableArtifactType | 'project'
 
 export type ArtifactContent =
   | {
@@ -81,6 +93,18 @@ export type ArtifactContent =
       theme?: PptTheme
       slides: PptSlide[]
     }
+  | {
+      type: 'project'
+      /** 该任务写入 workspace 的代码文件清单（相对 workspace 根）；正文留 workspace，不入 DB。 */
+      files: ProjectFile[]
+      taskId?: string
+      agentId?: string
+    }
+
+export interface ProjectFile {
+  path: string
+  sizeBytes: number
+}
 
 export type MermaidTheme = 'default' | 'base' | 'dark' | 'forest' | 'neutral'
 
@@ -190,7 +214,7 @@ export type DispatchTaskKind = 'code' | 'test' | 'review' | 'design' | 'doc' | '
 
 export interface DispatchExpectedOutput {
   id: string
-  type: WritableArtifactType
+  type: DispatchExpectedOutputType
   required?: boolean
   description?: string
 }

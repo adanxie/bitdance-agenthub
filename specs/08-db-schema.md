@@ -115,7 +115,7 @@ INDEX idx_messages_conv_created ON (conversation_id, created_at)
 artifacts {
   id                  text PK           // art_<nanoid>
   conversation_id     text NOT NULL  FK→conversations.id  ON DELETE CASCADE
-  type                text NOT NULL     // 'web_app'|'code_file'|'diff'|'document'|'image'
+  type                text NOT NULL     // 'web_app'|'code_file'|'diff'|'document'|'image'|'ppt'|'project'
   title               text NOT NULL
   content             text JSON NOT NULL // ArtifactContent，见 Spec 04
   version             int  NOT NULL default 1

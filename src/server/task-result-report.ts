@@ -1,5 +1,9 @@
 import { z } from 'zod'
 
+import {
+  CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE,
+  isCodeImplementationTask,
+} from '@/server/dispatch-plan'
 import type { RunToolEvidence } from '@/server/dispatch-run-evidence'
 import type { DispatchPlanItem, TaskResultReport } from '@/shared/types'
 
@@ -197,8 +201,15 @@ export function evaluateTaskResultReport(
     }
   }
 
+  if (isCodeImplementationTask(task) && !hasSuccessfulVerificationCommandEvidence(evidence)) {
+    return {
+      ok: false,
+      error: `Task "${task.id}" is missing successful runnable verification command evidence: build/compile/test/typecheck/lint command exitCode=0`,
+    }
+  }
+
   const missingEvidence = (task.requiredEvidence ?? []).filter(
-    (required) => !evidenceMentions(required, report, evidence),
+    (required) => !requiredEvidenceSatisfied(required, report, evidence),
   )
   if (missingEvidence.length > 0) {
     return {
@@ -241,6 +252,41 @@ function hasSuccessfulCommandEvidence(
       command.exitCode === 0,
   )
   return Boolean(reported || tested || recorded)
+}
+
+export function hasSuccessfulVerificationCommandEvidence(evidence: RunToolEvidence): boolean {
+  return evidence.commands.some(isSuccessfulVerificationCommandEvidence)
+}
+
+export function isVerificationCommand(command: string): boolean {
+  const normalized = normalizeCommand(command)
+  return (
+    !isPrepareCommand(normalized) &&
+    VERIFICATION_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized))
+  )
+}
+
+function isSuccessfulVerificationCommandEvidence(
+  command: RunToolEvidence['commands'][number],
+): boolean {
+  return (
+    !command.prepare &&
+    !command.isError &&
+    !command.timedOut &&
+    command.exitCode === 0 &&
+    isVerificationCommand(command.command)
+  )
+}
+
+function requiredEvidenceSatisfied(
+  required: string,
+  report: TaskResultReport,
+  evidence: RunToolEvidence,
+): boolean {
+  if (required.trim() === CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE) {
+    return hasSuccessfulVerificationCommandEvidence(evidence)
+  }
+  return evidenceMentions(required, report, evidence)
 }
 
 function evidenceMentions(
@@ -308,6 +354,29 @@ function normalizePath(value: string): string {
 
 function normalizeCommand(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
+}
+
+const VERIFICATION_COMMAND_PATTERNS = [
+  /\b(?:pnpm|npm|yarn|bun)(?:\.cmd)?\b(?=.*\b(?:run\s+)?(?:build|test|lint|typecheck|check|compile)(?:\b|:))/i,
+  /\b(?:tsc|tsc\.cmd)\b/i,
+  /\bnext(?:\.cmd)?\s+build\b/i,
+  /\bvite(?:\.cmd)?\s+build\b/i,
+  /\bmvn(?:\.cmd)?\b(?=.*\b(?:compile|test|package|verify)\b)/i,
+  /\b(?:gradle|gradlew|gradlew\.bat|\.\/gradlew)\b(?=.*\b(?:build|test|check)\b)/i,
+  /\bgo\s+(?:test|build)\b/i,
+  /\bcargo\s+(?:test|build|check)\b/i,
+  /\b(?:pytest|py\.test)\b/i,
+  /\bpython(?:3)?(?:\.exe)?\s+-m\s+pytest\b/i,
+  /\bruff\s+check\b/i,
+  /\bmypy\b/i,
+  /\bdotnet\s+(?:build|test)\b/i,
+]
+
+function isPrepareCommand(command: string): boolean {
+  return (
+    /^\s*(?:pnpm|npm|yarn|bun)(?:\.cmd)?\s+(?:install|i|ci|add)\b/i.test(command) &&
+    !/\b(?:build|test|lint|typecheck|check|compile)(?:\b|:)/i.test(command)
+  )
 }
 
 function readTaskResultReportFromUnknown(

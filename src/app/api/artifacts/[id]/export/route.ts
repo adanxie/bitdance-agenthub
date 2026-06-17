@@ -3,6 +3,9 @@ import JSZip from 'jszip'
 import { NextResponse } from 'next/server'
 
 import { db, schema } from '@/db/client'
+import { getWorkspaceForConversation } from '@/server/fs-service'
+import { zipProjectFromWorkspace } from '@/server/project-artifact'
+import { getEffectiveCwd } from '@/server/workspace-utils'
 import type { ArtifactContent } from '@/shared/types'
 
 interface RouteContext {
@@ -99,6 +102,25 @@ export async function GET(req: Request, ctx: RouteContext) {
         'Content-Type':
           'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         'Content-Disposition': `attachment; filename="${encodeURIComponent(baseName)}.pptx"`,
+      },
+    })
+  }
+
+  if (content.type === 'project') {
+    const workspace = await getWorkspaceForConversation(row.conversationId)
+    if (!workspace) {
+      return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
+    }
+    const buf = await zipProjectFromWorkspace(
+      getEffectiveCwd(workspace),
+      content.files,
+      row.title,
+      new Date().toISOString(),
+    )
+    return new NextResponse(new Uint8Array(buf), {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(baseName)}.zip"`,
       },
     })
   }

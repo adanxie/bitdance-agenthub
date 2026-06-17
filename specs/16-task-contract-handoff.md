@@ -10,7 +10,7 @@ This spec supplements Spec 06 (Orchestrator flow) and Spec 07 (tools) with struc
 {
   expectedOutputs?: Array<{
     id: string
-    type: ArtifactType
+    type: WritableArtifactType | 'project'
     required?: boolean
     description?: string
   }>
@@ -21,10 +21,16 @@ This spec supplements Spec 06 (Orchestrator flow) and Spec 07 (tools) with struc
     description?: string
   }>
   acceptanceCriteria?: string[]
+  taskKind?: 'code' | 'test' | 'review' | 'design' | 'doc' | 'analysis'
+  targetPaths?: string[]
+  expectedWorkspaceChanges?: string[]
+  requiredCommands?: Array<{ command: string; cwd?: string; timeoutMs?: number }>
+  requiredEvidence?: string[]
 }
 ```
 
 `expectedOutputs.id` and `inputs.outputId` are symbolic keys within one dispatch plan. They are not database artifact ids.
+`project` expected outputs are reference artifacts created by AgentHub from workspace file-write evidence; child agents do not create them with `write_artifact`.
 
 ## Plan Compilation
 
@@ -34,6 +40,7 @@ AgentRunner compiles a plan before validation and execution:
 - Preserve existing deterministic text-based dependency inference.
 - Add each `inputs.fromTaskId` to the task's `dependsOn`.
 - Keep dependency order stable and de-duplicated.
+- Normalize code implementation tasks by adding a required `project` expected output, a runnable acceptance criterion, and required evidence for at least one successful non-prepare verification command.
 
 ## Plan Validation
 
@@ -82,7 +89,7 @@ Child prompts include:
 </acceptance_criteria>
 ```
 
-The child agent must read required input artifacts before working, pass the declared `outputKey` when creating each expected output, and call `report_task_result` at the end.
+The child agent must read required input artifacts before working, pass the declared `outputKey` when creating each non-project expected output, and call `report_task_result` at the end. For `project` expected outputs, the child agent must write workspace files; AgentHub creates and binds the project artifact automatically.
 
 When `acceptanceCriteria` is present, the child agent must copy each criterion into `report_task_result.acceptanceResults` with `passed` and `evidence`.
 
@@ -92,7 +99,9 @@ When `acceptanceCriteria` is present, the child agent must copy each criterion i
 - A task that completes without `report_task_result` is converted to `failed`.
 - A task whose `report_task_result.status` is `failed` or `blocked` is converted to dispatch `failed`; blocked details remain in the error/report summary because `DispatchTaskStatus` has no separate `blocked` state.
 - A task with acceptance criteria is converted to `failed` when any criterion is missing from `acceptanceResults` or has `passed=false`.
-- `expectedOutputs` / `outputKey` are artifact handoff metadata, not completion gates. A task can complete without producing artifacts when `report_task_result.status='complete'`.
+- A code implementation task is converted to `failed` unless recorded command evidence contains at least one successful non-prepare verification command such as `pnpm build`, `pnpm test`, `mvn compile`, `go test`, `cargo check`, `pytest`, `tsc`, or `dotnet build`.
+- A required `project` expected output on a code task is a completion gate. AgentRunner creates it from workspace file writes and binds it to the output key before accepting the task as `complete`.
+- Non-project `expectedOutputs` / `outputKey` remain artifact handoff metadata; they do not by themselves determine completion unless another task declares them as required inputs.
 - If a downstream task declares a required `inputs` reference and the upstream result has no bound artifact for that output key, the downstream task is skipped before launch.
 - Optional inputs may be missing; the prompt records them as missing.
 - Downstream tasks follow existing skip behavior when dependencies are not complete.

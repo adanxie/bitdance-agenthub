@@ -5,8 +5,12 @@ import type { DispatchPlanItem } from '@/shared/types'
 import {
   assertAcyclicDispatchPlan,
   buildReplanContext,
+  CODE_TASK_PROJECT_OUTPUT_DESCRIPTION,
+  CODE_TASK_RUNNABLE_ACCEPTANCE_CRITERION,
+  CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE,
   collectDependencyClosure,
   compileDispatchPlan,
+  extractPlanTasksToolArgs,
   parseDispatchPlanToolArgs,
   shouldReplan,
   taskExpectsArtifact,
@@ -19,6 +23,11 @@ const agents = [
   { id: 'ag_frontend' },
   { id: 'ag_reviewer' },
 ]
+
+const planArgs = {
+  reasoning: 'Split into implementation and review.',
+  tasks: [{ id: 't1', agentId: 'ag_frontend', task: 'Build UI' }],
+}
 
 function task(
   id: string,
@@ -134,6 +143,30 @@ describe('parseDispatchPlanToolArgs', () => {
           },
         ],
         requiredEvidence: ['测试命令 exitCode=0'],
+      },
+    ])
+  })
+
+  it('parses project expected outputs for workspace code trees', () => {
+    expect(
+      parseDispatchPlanToolArgs({
+        tasks: [
+          {
+            id: 't1',
+            agentId: 'ag_frontend',
+            task: 'Implement frontend project',
+            taskKind: 'code',
+            expectedOutputs: [{ id: 'project', type: 'project', required: true }],
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: 't1',
+        agentId: 'ag_frontend',
+        task: 'Implement frontend project',
+        taskKind: 'code',
+        expectedOutputs: [{ id: 'project', type: 'project', required: true }],
       },
     ])
   })
@@ -274,7 +307,90 @@ describe('validateDispatchPlan', () => {
   })
 })
 
+describe('extractPlanTasksToolArgs', () => {
+  it('recognizes native AgentHub plan_tasks tool calls', () => {
+    expect(extractPlanTasksToolArgs({ toolName: 'plan_tasks', args: planArgs })).toBe(planArgs)
+  })
+
+  it('recognizes Claude Code MCP plan_tasks tool calls', () => {
+    expect(extractPlanTasksToolArgs({ toolName: 'mcp__agenthub__plan_tasks', args: planArgs }))
+      .toBe(planArgs)
+  })
+
+  it('unwraps Codex MCP plan_tasks tool call arguments', () => {
+    expect(
+      extractPlanTasksToolArgs({
+        toolName: 'codex_mcp_agenthub_plan_tasks',
+        args: { server: 'agenthub', tool: 'plan_tasks', arguments: planArgs },
+      }),
+    ).toBe(planArgs)
+  })
+
+  it('unwraps JSON-encoded Codex MCP plan_tasks tool call arguments', () => {
+    expect(
+      extractPlanTasksToolArgs({
+        toolName: 'codex_mcp_agenthub_plan_tasks',
+        args: { server: 'agenthub', tool: 'plan_tasks', arguments: JSON.stringify(planArgs) },
+      }),
+    ).toEqual(planArgs)
+  })
+
+  it('ignores unrelated tool calls', () => {
+    expect(extractPlanTasksToolArgs({ toolName: 'write_artifact', args: planArgs })).toBeNull()
+  })
+})
+
 describe('compileDispatchPlan', () => {
+  it('adds required project output and runnable evidence to code tasks', () => {
+    const { plan } = compileDispatchPlan([
+      {
+        ...task('t1', 'ag_frontend', undefined, 'Implement the frontend app'),
+        taskKind: 'code',
+      },
+    ])
+
+    expect(plan[0].expectedOutputs).toContainEqual({
+      id: 'project',
+      type: 'project',
+      required: true,
+      description: CODE_TASK_PROJECT_OUTPUT_DESCRIPTION,
+    })
+    expect(plan[0].acceptanceCriteria).toContain(CODE_TASK_RUNNABLE_ACCEPTANCE_CRITERION)
+    expect(plan[0].requiredEvidence).toContain(CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE)
+  })
+
+  it('forces declared project outputs on code tasks to be required', () => {
+    const { plan } = compileDispatchPlan([
+      {
+        ...task('t1', 'ag_frontend', undefined, 'Implement the backend project'),
+        taskKind: 'code',
+        expectedOutputs: [{ id: 'workspace', type: 'project', required: false }],
+      },
+    ])
+
+    expect(plan[0].expectedOutputs).toEqual([
+      {
+        id: 'workspace',
+        type: 'project',
+        required: true,
+        description: CODE_TASK_PROJECT_OUTPUT_DESCRIPTION,
+      },
+    ])
+  })
+
+  it('does not add project outputs to explicit review tasks', () => {
+    const { plan } = compileDispatchPlan([
+      {
+        ...task('t1', 'ag_reviewer', undefined, 'Review the implementation and summarize risks'),
+        taskKind: 'review',
+      },
+    ])
+
+    expect(plan[0].expectedOutputs).toBeUndefined()
+    expect(plan[0].acceptanceCriteria).toBeUndefined()
+    expect(plan[0].requiredEvidence).toBeUndefined()
+  })
+
   it('infers missing dependencies from task id artifact references', () => {
     const { plan, inferredDependencies } = compileDispatchPlan([
       task('t1', 'ag_pm', undefined, '请产出 PRD 文档，并写入 artifact。'),

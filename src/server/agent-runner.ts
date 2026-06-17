@@ -7,6 +7,8 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { db, schema } from '@/db/client'
 import type { AgentRow, ArtifactRow, MessageRow, WorkspaceRow } from '@/db/schema'
 import type {
+  ArtifactContent,
+  DispatchExpectedOutputType,
   DispatchExpectedOutput,
   DispatchPlanItem,
   DispatchTaskInput,
@@ -14,7 +16,6 @@ import type {
   MessagePart,
   StreamEvent,
   TaskResultReport,
-  WritableArtifactType,
 } from '@/shared/types'
 import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 
@@ -45,6 +46,7 @@ import {
   buildReviseContext,
   collectDependencyClosure,
   compileDispatchPlan,
+  extractPlanTasksToolArgs,
   getRequiredExpectedOutputs,
   parseDispatchPlanToolArgs,
   shouldReplan,
@@ -53,8 +55,9 @@ import {
   type ReplanTaskView,
 } from './dispatch-plan'
 import { eventBus } from './event-bus'
-import { newRunId } from './ids'
+import { newArtifactId, newRunId } from './ids'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
+import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
 import {
   evaluateTaskResultReport,
@@ -145,7 +148,7 @@ interface BlockedDependency {
 
 interface ResolvedTaskInput {
   input: DispatchTaskInput
-  type: WritableArtifactType | null
+  type: DispatchExpectedOutputType | null
   artifactId: string | null
   missing: boolean
 }
@@ -371,7 +374,20 @@ async function executeSimpleRun(
     signal,
   )
 
-  return consumeStream(stream, args.agentId, runId)
+  const result = await consumeStream(stream, args.agentId, runId)
+  if (args.parentRunId) return result
+
+  try {
+    await maybeCreateProjectArtifact({
+      evidence: getRunToolEvidence(runId),
+      conversationId: args.conversationId,
+      agentId: args.agentId,
+      result,
+    })
+  } finally {
+    clearRunToolEvidence(runId)
+  }
+  return result
 }
 
 // ─── Orchestrator ──────────────────────────────────────────
@@ -611,8 +627,10 @@ async function runPlanStage(
       signal,
     )
   const planRun = await consumeStream(planStream, agent.id, runId, (event) => {
-    if (event.type === 'tool.call' && event.toolName === 'plan_tasks') {
-      const plan = parseDispatchPlanToolArgs(event.args)
+    if (event.type === 'tool.call') {
+      const planArgs = extractPlanTasksToolArgs(event)
+      if (planArgs === null) return
+      const plan = parseDispatchPlanToolArgs(planArgs)
       planRef.value = plan
       return {
         stop: true,
@@ -879,11 +897,34 @@ async function runChildTask(
         attemptEvaluation.rawResult,
         aggregateEvidence,
       )
-      const currentEvaluation: ChildAttemptEvaluation = {
+      let currentEvaluation: ChildAttemptEvaluation = {
         ...attemptEvaluation,
         result: { ...evaluatedResult, runIds: [...attemptRunIds] },
         evidence: cloneRunToolEvidence(aggregateEvidence),
       }
+
+      if (currentEvaluation.result.status === 'complete') {
+        const projectArtifactId = await maybeCreateProjectArtifact({
+          evidence: aggregateEvidence,
+          conversationId: ctx.conversationId,
+          agentId: task.agentId,
+          taskId: task.id,
+          result: currentEvaluation.result,
+        })
+        const resultWithProject = bindProjectExpectedOutput(
+          task,
+          currentEvaluation.result,
+          projectArtifactId,
+        )
+        const outputEvaluation = evaluateRequiredProjectOutputs(task, resultWithProject)
+        currentEvaluation = {
+          ...currentEvaluation,
+          result: outputEvaluation.ok
+            ? resultWithProject
+            : { ...resultWithProject, status: 'failed', error: outputEvaluation.error },
+        }
+      }
+
       lastEvaluation = currentEvaluation
 
       if (currentEvaluation.result.status === 'complete') {
@@ -925,6 +966,62 @@ async function runChildTask(
   } finally {
     release?.()
   }
+}
+
+async function maybeCreateProjectArtifact(args: {
+  evidence: RunToolEvidence
+  conversationId: string
+  agentId: string
+  taskId?: string
+  result: { artifactIds: string[] }
+}): Promise<string | null> {
+  if (args.evidence.fileWrites.length === 0) return null
+  const workspace = await db.query.workspaces.findFirst({
+    where: eq(schema.workspaces.conversationId, args.conversationId),
+  })
+  if (!workspace) return null
+  const files = buildProjectFiles(args.evidence.fileWrites, getEffectiveCwd(workspace))
+  if (files.length === 0) return null
+
+  const agent = await db.query.agents.findFirst({ where: eq(schema.agents.id, args.agentId) })
+  const title = `${agent?.name ?? args.agentId} · 项目产物`
+  const content: ArtifactContent = {
+    type: 'project',
+    files,
+    ...(args.taskId ? { taskId: args.taskId } : {}),
+    agentId: args.agentId,
+  }
+  const artifactId = newArtifactId()
+  const createdAt = Date.now()
+  await db.insert(schema.artifacts).values({
+    id: artifactId,
+    conversationId: args.conversationId,
+    type: 'project',
+    title,
+    content,
+    version: 1,
+    parentArtifactId: null,
+    createdByAgentId: args.agentId,
+    createdAt,
+  })
+  args.result.artifactIds.push(artifactId)
+  publish({
+    type: 'artifact.create',
+    conversationId: args.conversationId,
+    timestamp: Date.now(),
+    artifact: {
+      id: artifactId,
+      conversationId: args.conversationId,
+      type: 'project',
+      title,
+      content,
+      version: 1,
+      parentArtifactId: undefined,
+      createdByAgentId: args.agentId,
+      createdAt,
+    },
+  })
+  return artifactId
 }
 
 async function runChildTaskAttempt(
@@ -1012,13 +1109,18 @@ function mergeAttemptAggregate(
   result: DispatchTaskResult,
   aggregate: RunExecutionResult,
 ): DispatchTaskResult {
+  const artifactIds = mergeUnique([...aggregate.artifactIds, ...result.artifactIds])
   return {
     ...result,
     runIds: result.runIds,
-    artifactIds: [...aggregate.artifactIds],
+    artifactIds,
     outputMessageIds: [...aggregate.outputMessageIds],
     outputArtifacts: { ...aggregate.outputArtifacts, ...result.outputArtifacts },
   }
+}
+
+function mergeUnique(values: string[]): string[] {
+  return [...new Set(values)]
 }
 
 async function runRequiredCommands(
@@ -1268,6 +1370,38 @@ function bindImplicitSingleOutput(
   if (Object.values(outputArtifacts).includes(result.artifactIds[0])) return outputArtifacts
   outputArtifacts[outputId] = result.artifactIds[0]
   return outputArtifacts
+}
+
+function bindProjectExpectedOutput(
+  task: DispatchPlanItem,
+  result: DispatchTaskResult,
+  projectArtifactId: string | null,
+): DispatchTaskResult {
+  if (!projectArtifactId) return result
+  const projectOutputs = getRequiredExpectedOutputs(task).filter((output) => output.type === 'project')
+  if (projectOutputs.length === 0) return result
+
+  const outputArtifacts = { ...result.outputArtifacts }
+  for (const output of projectOutputs) {
+    outputArtifacts[output.id] ??= projectArtifactId
+  }
+  return { ...result, outputArtifacts }
+}
+
+function evaluateRequiredProjectOutputs(
+  task: DispatchPlanItem,
+  result: DispatchTaskResult,
+): { ok: boolean; error?: string } {
+  const missing = getRequiredExpectedOutputs(task)
+    .filter((output) => output.type === 'project')
+    .filter((output) => !result.outputArtifacts[output.id])
+  if (missing.length === 0) return { ok: true }
+  return {
+    ok: false,
+    error: `Task "${task.id}" is missing required project output: ${missing
+      .map((output) => output.id)
+      .join(', ')}`,
+  }
 }
 
 function resolveTaskInputs(
@@ -1990,22 +2124,27 @@ function buildAgentHubToolGuidance(
   const tools = new Set(toolNames)
   const isSdkAgent = agent.adapterName === 'claude-code' || agent.adapterName === 'codex'
   if (isSdkAgent) {
-    for (const toolName of [
-      'write_artifact',
-      'read_artifact',
-      'deploy_artifact',
-      'deploy_workspace',
-      ASK_USER_TOOL_NAME,
-      REPORT_TASK_RESULT_TOOL_NAME,
-    ]) {
+    const sdkAgentHubTools = tools.has('plan_tasks')
+      ? ['read_artifact', 'read_attachment', 'fs_list', ASK_USER_TOOL_NAME]
+      : [
+          'write_artifact',
+          'read_artifact',
+          'deploy_artifact',
+          'deploy_workspace',
+          ASK_USER_TOOL_NAME,
+          REPORT_TASK_RESULT_TOOL_NAME,
+        ]
+    for (const toolName of sdkAgentHubTools) {
       tools.add(toolName)
     }
   }
+  const isPlanStage = tools.has('plan_tasks')
 
   const sections: string[] = []
   const add = (lines: string[]) => sections.push(lines.join('\n'))
   const hasWorkspaceFileTools =
-    tools.has('fs_read') || tools.has('fs_write') || tools.has('bash') || isSdkAgent
+    !isPlanStage &&
+    (tools.has('fs_read') || tools.has('fs_write') || tools.has('bash') || isSdkAgent)
 
   if (tools.size > 0) {
     add([
@@ -2083,7 +2222,8 @@ function buildAgentHubToolGuidance(
       'ppt 支持 blocks：heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer；columns 内只放 paragraph/bullets/metric/callout。不要在 ppt JSON 里嵌入 base64/data URI 大资产。',
       '常见错误：把 content 作为 JSON 字符串传入，例如 content: "{\\"format\\":\\"markdown\\"}"；必须传原始对象。',
       '字段名必须是 parentArtifactId、outputKey；不要写 parent_artifact_id、output_key。',
-      '如果子任务声明 expectedOutputs，创建对应产物时传 outputKey 等于 expectedOutputs.id。',
+      '如果子任务声明非 project 的 expectedOutputs，创建对应产物时传 outputKey 等于 expectedOutputs.id。',
+      'project 产物不能用 write_artifact 创建；代码任务通过 fs_write / bash 写入 workspace 文件后由 AgentHub 自动生成 project。',
     ])
   }
 
@@ -2108,7 +2248,10 @@ function buildAgentHubToolGuidance(
     ])
   }
 
-  if (tools.has('fs_list') || tools.has('fs_read') || tools.has('fs_write') || tools.has('bash')) {
+  if (
+    !isPlanStage &&
+    (tools.has('fs_list') || tools.has('fs_read') || tools.has('fs_write') || tools.has('bash'))
+  ) {
     add([
       '### workspace 文件与命令工具',
       '用途：只操作当前 workspace 内的真实文件；路径必须在 <workspace_info><cwd> 下。',
@@ -2129,7 +2272,7 @@ function buildAgentHubToolGuidance(
       '正确案例：实现依赖设计时，t2.dependsOn=["t1"]，不要只在 task 文本里写“基于 t1”。',
       '字段名必须是 agentId、dependsOn、expectedOutputs、acceptanceCriteria、taskKind、targetPaths、expectedWorkspaceChanges、requiredCommands、requiredEvidence；不要写 snake_case。',
       '文字型审查/诊断任务不要声明 expectedOutputs；把完成条件写进 acceptanceCriteria。',
-      '代码任务正确案例：{ taskKind: "code", targetPaths: ["frontend/"], requiredCommands: [{ command: "pnpm build", cwd: "frontend", timeoutMs: 300000 }], requiredEvidence: ["列出实际修改文件", "测试命令 exitCode=0"] }。',
+      '代码任务正确案例：{ taskKind: "code", expectedOutputs: [{ id: "project", type: "project", required: true }], targetPaths: ["frontend/"], acceptanceCriteria: ["项目构建/编译验证通过"], requiredCommands: [{ command: "pnpm build", cwd: "frontend", timeoutMs: 300000 }], requiredEvidence: ["至少一条构建/编译/测试/类型检查命令 exitCode=0"] }。',
     ])
   }
 
@@ -2207,7 +2350,9 @@ function buildOrchestratorPlanPrompt(
     '- 若任务 B 需要任务 A 的产物 / 结论 / 输出，你【必须】在 B 的 dependsOn 里写上 A 的 id。',
     '- 在 task 文本里写「先做 A」「基于上一步」之类【没有任何效果】——执行顺序只认 dependsOn 字段。',
     '- 只有彼此真正无关、可同时进行的任务才留空 dependsOn；拿不准时倾向加依赖（串行更安全）。',
-    '- Only declare expectedOutputs when the assigned agent must create a real artifact via write_artifact for downstream handoff or user inspection.',
+    '- Code implementation tasks MUST set taskKind="code", declare expectedOutputs:[{ id:"project", type:"project", required:true }], and include an acceptanceCriteria item requiring build/compile/test/typecheck to pass.',
+    '- project expectedOutputs are system-created from workspace file writes; do not ask the child agent to call write_artifact for project.',
+    '- Only declare non-project expectedOutputs when the assigned agent must create a real artifact via write_artifact for downstream handoff or user inspection.',
     '- Do NOT declare expectedOutputs for text-only tasks such as review, validation, diagnosis, status check, explanation, or summary; put their completion checks in acceptanceCriteria.',
     '- If a task needs an upstream artifact, declare inputs with fromTaskId and outputId; the system will compile these into dependencies.',
     '- For tasks with quality requirements, add concise acceptanceCriteria that the assigned agent can verify.',
@@ -2362,11 +2507,13 @@ async function buildSubAgentPrompt(
     'Before working, read every required input artifact with read_artifact(artifactId).',
     workspace.mode === 'local' &&
       'If this task is about local project source files, directly modify the current local workspace with file/command tools. Do not use write_artifact to store source files that should be written to disk.',
-    'If expected_outputs are declared and your completed work creates an artifact, use write_artifact and pass outputKey equal to that output id.',
+    'For expected_outputs with type="project", write the project files into the workspace with fs_write or bash; AgentHub will create and bind the project artifact automatically. Do not call write_artifact for project.',
+    'For non-project expected_outputs, create the artifact with write_artifact and pass outputKey equal to that output id.',
     'If no expected_outputs are declared, complete the task with a normal message; do not create an artifact just to satisfy status tracking.',
     'Satisfy every acceptance_criteria item when present.',
     'If evidence_contract is present, include matching filesChanged, commandsRun, tests, and/or acceptanceResults evidence in report_task_result.',
     'For required_commands, you may run the command yourself, and AgentHub will also run it as a completion gate after your attempt. Use bash cwd instead of cd when running commands in subdirectories.',
+    'If dependencies are missing, install them inside the workspace and continue; dependency installation is preparation, not completion evidence.',
     'If a required command fails, fix the issue and continue; do not report complete until the command can pass.',
     'For target_paths, list every changed or verified path in report_task_result.filesChanged.',
     'At the end, call report_task_result exactly once. A normal text response alone does not complete this dispatched task.',

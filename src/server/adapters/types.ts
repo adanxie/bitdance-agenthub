@@ -42,7 +42,7 @@ export interface AdapterInput {
   modelId: string | null
 
   /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。
-   *  Claude Code adapter 会忽略此字段（用 SDK preset 工具集）。 */
+   *  SDK adapters use this to scope AgentHub MCP tools and Orchestrator plan-stage restrictions. */
   toolNames: string[]
 
   /** 触发消息的附件（图片 / 文件），adapter 决定是否注入到 LLM content */

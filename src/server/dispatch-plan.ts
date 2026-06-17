@@ -1,7 +1,9 @@
 import type {
+  DispatchExpectedOutputType,
   DispatchExpectedOutput,
   DispatchPlanItem,
   DispatchTaskKind,
+  StreamEvent,
   WritableArtifactType,
 } from '@/shared/types'
 
@@ -31,6 +33,10 @@ const WRITABLE_ARTIFACT_TYPES = new Set<WritableArtifactType>([
   'ppt',
   'diagram',
 ])
+const EXPECTED_OUTPUT_TYPES = new Set<DispatchExpectedOutputType>([
+  ...WRITABLE_ARTIFACT_TYPES,
+  'project',
+])
 const DISPATCH_TASK_KINDS = new Set<DispatchTaskKind>([
   'code',
   'test',
@@ -39,6 +45,32 @@ const DISPATCH_TASK_KINDS = new Set<DispatchTaskKind>([
   'doc',
   'analysis',
 ])
+
+export const CODE_TASK_PROJECT_OUTPUT_ID = 'project'
+export const CODE_TASK_PROJECT_OUTPUT_DESCRIPTION =
+  'Workspace project files written by this code task'
+export const CODE_TASK_RUNNABLE_ACCEPTANCE_CRITERION =
+  '项目构建/编译验证通过（至少一条非准备验证命令 exitCode=0）'
+export const CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE =
+  '至少一条构建/编译/测试/类型检查命令 exitCode=0'
+export const PLAN_TASKS_TOOL_NAME = 'plan_tasks'
+
+type ToolCallEvent = Extract<StreamEvent, { type: 'tool.call' }>
+
+export function extractPlanTasksToolArgs(event: Pick<ToolCallEvent, 'toolName' | 'args'>): unknown | null {
+  if (event.toolName === PLAN_TASKS_TOOL_NAME) return event.args
+  if (event.toolName === `mcp__agenthub__${PLAN_TASKS_TOOL_NAME}`) return event.args
+  if (event.toolName === `codex_mcp_agenthub_${PLAN_TASKS_TOOL_NAME}`) {
+    return readCodexMcpToolArguments(event.args)
+  }
+  if (
+    event.toolName.endsWith(`__${PLAN_TASKS_TOOL_NAME}`) ||
+    event.toolName.endsWith(`_${PLAN_TASKS_TOOL_NAME}`)
+  ) {
+    return event.args
+  }
+  return null
+}
 
 export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
   if (!isRecord(args) || !Array.isArray(args.tasks)) {
@@ -79,7 +111,7 @@ export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
           output.id,
           `task "${id}" expectedOutputs[${outputIndex}].id`,
         )
-        const type = readWritableArtifactType(
+        const type = readExpectedOutputType(
           output.type,
           `task "${id}" expectedOutputs[${outputIndex}].type`,
         )
@@ -231,6 +263,17 @@ export function parseDispatchPlanToolArgs(args: unknown): DispatchPlanItem[] {
   })
 }
 
+function readCodexMcpToolArguments(args: unknown): unknown {
+  if (!isRecord(args) || args.tool !== PLAN_TASKS_TOOL_NAME) return args
+  const rawArguments = args.arguments
+  if (typeof rawArguments !== 'string') return rawArguments
+  try {
+    return JSON.parse(rawArguments) as unknown
+  } catch {
+    return rawArguments
+  }
+}
+
 export function validateDispatchPlan(
   plan: DispatchPlanItem[],
   availableAgents: readonly { id: string }[],
@@ -360,10 +403,82 @@ export function compileDispatchPlan(plan: DispatchPlanItem[]): CompileDispatchPl
       })
     }
 
-    return item
+    return normalizeTaskContract(item)
   })
 
   return { plan: compiled, inferredDependencies }
+}
+
+export function normalizeTaskContract(task: DispatchPlanItem): DispatchPlanItem {
+  if (!isCodeImplementationTask(task)) return task
+
+  return {
+    ...task,
+    expectedOutputs: ensureCodeProjectOutput(task.expectedOutputs ?? []),
+    acceptanceCriteria: appendUnique(
+      task.acceptanceCriteria ?? [],
+      CODE_TASK_RUNNABLE_ACCEPTANCE_CRITERION,
+    ),
+    requiredEvidence: appendUnique(
+      task.requiredEvidence ?? [],
+      CODE_TASK_RUNNABLE_REQUIRED_EVIDENCE,
+    ),
+  }
+}
+
+export function isCodeImplementationTask(task: DispatchPlanItem): boolean {
+  if (task.taskKind !== undefined) return task.taskKind === 'code'
+  if ((task.expectedOutputs ?? []).some((output) => output.type === 'project')) return true
+  if (
+    ((task.targetPaths ?? []).length > 0 ||
+      (task.expectedWorkspaceChanges ?? []).length > 0) &&
+    !isReviewTask(task.task)
+  ) {
+    return true
+  }
+  return CODE_TASK_PATTERN.test(task.task) && !isReviewTask(task.task)
+}
+
+const CODE_TASK_PATTERN =
+  /(?:实现|开发|修复|改造|重构|搭建|脚手架|前端|后端|接口|组件|页面|代码|项目|工程|应用|构建|编译|implement|develop|build|scaffold|frontend|backend|api|endpoint|component|page|code|project|app|fix|refactor)/i
+
+function ensureCodeProjectOutput(
+  outputs: DispatchExpectedOutput[],
+): DispatchExpectedOutput[] {
+  let hasProject = false
+  const normalized = outputs.map((output) => {
+    if (output.type !== 'project') return output
+    hasProject = true
+    return {
+      ...output,
+      required: true,
+      description: output.description ?? CODE_TASK_PROJECT_OUTPUT_DESCRIPTION,
+    }
+  })
+  if (hasProject) return normalized
+  return [
+    ...normalized,
+    {
+      id: nextUniqueOutputId(outputs, CODE_TASK_PROJECT_OUTPUT_ID),
+      type: 'project',
+      required: true,
+      description: CODE_TASK_PROJECT_OUTPUT_DESCRIPTION,
+    },
+  ]
+}
+
+function nextUniqueOutputId(outputs: DispatchExpectedOutput[], preferred: string): string {
+  const used = new Set(outputs.map((output) => output.id))
+  if (!used.has(preferred)) return preferred
+  for (let index = 2; ; index++) {
+    const candidate = `${preferred}_${index}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
+function appendUnique(values: string[], value: string): string[] {
+  const normalized = new Set(values.map((item) => item.trim()))
+  return normalized.has(value) ? values : [...values, value]
 }
 
 export function collectDependencyClosure(plan: DispatchPlanItem[], taskId: string): string[] {
@@ -561,13 +676,13 @@ function readOptionalTaskKind(value: unknown, label: string): DispatchTaskKind |
   return value as DispatchTaskKind
 }
 
-function readWritableArtifactType(value: unknown, label: string): WritableArtifactType {
-  if (typeof value !== 'string' || !WRITABLE_ARTIFACT_TYPES.has(value as WritableArtifactType)) {
+function readExpectedOutputType(value: unknown, label: string): DispatchExpectedOutputType {
+  if (typeof value !== 'string' || !EXPECTED_OUTPUT_TYPES.has(value as DispatchExpectedOutputType)) {
     throw new Error(
-      `Invalid dispatch plan: ${label} must be one of ${[...WRITABLE_ARTIFACT_TYPES].join(', ')}`,
+      `Invalid dispatch plan: ${label} must be one of ${[...EXPECTED_OUTPUT_TYPES].join(', ')}`,
     )
   }
-  return value as WritableArtifactType
+  return value as DispatchExpectedOutputType
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

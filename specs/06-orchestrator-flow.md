@@ -185,7 +185,9 @@ const planTasksTool: ToolDef = {
 - 能并行的尽量并行（不写 dependsOn）
 - 有依赖关系的明确写 dependsOn
 - 每个子任务给出独立可执行的描述（被分派的 Agent 看不到完整群聊上下文）
-- 只有需要真实 artifact 交接或供用户预览时才声明 expectedOutputs
+- 代码实现任务必须声明 taskKind="code"，并声明 required project expectedOutputs；project 由 workspace 文件写入自动产物化，不由 write_artifact 创建
+- 代码实现任务必须声明可验证的 acceptanceCriteria / requiredEvidence，并尽量声明 requiredCommands（如 pnpm build、mvn compile）
+- 只有需要真实 artifact 交接或供用户预览时才声明非 project expectedOutputs
 - 审查 / 验证 / 诊断 / 状态检查 / 解释 / 总结等文字型任务不要声明 expectedOutputs，用 acceptanceCriteria 描述完成条件
 - local workspace 中的本地代码任务（创建 / 修改 / 初始化 / 调试 / 构建项目或源码文件）应派给具备 fs_read / fs_write / bash 或 SDK 本地工具的 Agent
 - local workspace 代码任务不要声明 expectedOutputs，用 acceptanceCriteria 描述应落盘的目录、文件、命令和验证结果；task 文本要明确要求直接修改当前本地 workspace 文件，不要用 write_artifact 代替源码落盘
@@ -232,7 +234,7 @@ const planTasksTool: ToolDef = {
 
 **lazy load**：子 Agent 需要某个产物详情时，调用 `read_artifact(id)` 工具按需获取。
 
-**结果上报**：子 Agent 收尾时必须调用 `report_task_result`。AgentRunner 不再把“child run 成功结束”或“artifact 已产出”直接等同于“任务完成”；只有 report 的 `status='complete'` 且 `acceptanceCriteria` 全部通过时，任务才进入 `complete`。未调用该工具、report 为 `failed/blocked`、或任一 acceptance result 失败 / 缺失，都会把该任务判为 `failed`。
+**结果上报**：子 Agent 收尾时必须调用 `report_task_result`。AgentRunner 不再把“child run 成功结束”或“artifact 已产出”直接等同于“任务完成”；只有 report 的 `status='complete'` 且 `acceptanceCriteria` 全部通过时，任务才可能进入 `complete`。代码实现任务还必须有至少一条非 prepare 的成功验证命令 evidence（如 build/test/typecheck/compile exitCode=0），并且 required project output 已由 workspace 写入产物化并绑定。未调用该工具、report 为 `failed/blocked`、任一 acceptance result 失败 / 缺失、代码任务无成功验证命令、或代码任务缺少 required project output，都会把该任务判为 `failed`。
 
 **artifact 注入**：
 - `upstream_artifacts`：来自当前任务 `dependsOn` 的传递闭包上游结果，按 artifact id 去重后全部列出。例：`t4 -> t3 -> t2 -> t1` 时，t4 能看到 t1/t2/t3 的产物摘要。
@@ -366,10 +368,21 @@ async function runSubTask(
   error 记录未通过 / 未上报的验收项
   下游按依赖失败规则 skipped
 
+代码实现任务没有成功的非 prepare 验证命令 evidence:
+  TaskResult.status = 'failed'
+  error 记录缺少 build/compile/test/typecheck/lint exitCode=0 evidence
+  进入已有重试 / 动态重规划补救流程
+
+代码实现任务缺少 required project output:
+  TaskResult.status = 'failed'
+  error 记录缺少 project output
+  进入已有重试 / 动态重规划补救流程
+
 expectedOutputs / outputKey:
-  只用于 artifact 交接映射，不直接决定 TaskResult.status
+  非 project expectedOutputs 只用于 artifact 交接映射，不直接决定 TaskResult.status
+  代码任务的 required project expectedOutput 是完成 gate，由 workspace fileWrites 自动生成并绑定
   如果上游 complete 但没有绑定下游需要的 artifact，依赖该 artifact 的任务会因 required input 缺失而 skipped
-  上游任务本身是否 complete 由 report_task_result 判定
+  上游任务本身是否 complete 由 report_task_result、acceptanceCriteria、代码验证 evidence、required project output 共同判定
 
 某任务的任一 dependsOn 上游不是 complete:
   不启动该任务，不创建 child AgentRun

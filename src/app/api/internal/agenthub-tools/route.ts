@@ -8,7 +8,9 @@ import { askUserTool } from '@/server/tools/ask-user'
 import { deployArtifactTool } from '@/server/tools/deploy-artifact'
 import { deployWorkspaceTool } from '@/server/tools/deploy-workspace'
 import { fsListTool } from '@/server/tools/fs-list'
+import { planTasksTool } from '@/server/tools/plan-tasks'
 import { readArtifactTool } from '@/server/tools/read-artifact'
+import { readAttachmentTool } from '@/server/tools/read-attachment'
 import { reportTaskResultTool } from '@/server/tools/report-task-result'
 import type { ToolContext } from '@/server/tools/types'
 import { writeArtifactTool } from '@/server/tools/write-artifact'
@@ -24,6 +26,8 @@ const EXPOSED_TOOLS = {
   ask_user: askUserTool,
   report_task_result: reportTaskResultTool,
   fs_list: fsListTool,
+  plan_tasks: planTasksTool,
+  read_attachment: readAttachmentTool,
 }
 
 const BodySchema = z.object({

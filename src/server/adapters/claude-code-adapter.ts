@@ -6,11 +6,13 @@ import {
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
 import { eq } from 'drizzle-orm'
+import { statSync } from 'node:fs'
 import { z } from 'zod'
 
 import { classifyBashApproval, waitForBashApproval } from '@/server/bash-command-approval'
 import { db, schema } from '@/db/client'
 import type { WorkspaceRow } from '@/db/schema'
+import { recordRunFileWrite } from '@/server/dispatch-run-evidence'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
 import { pendingWrites } from '@/server/pending-writes'
@@ -53,6 +55,15 @@ const DEFAULT_MODEL = 'claude-opus-4-7'
 const FS_WRITE_TOOLS = new Set(['Write', 'Edit'])
 /** 需要路径沙箱检查的工具（Bash 单独走黑名单 + cwd 限定） */
 const PATH_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit'])
+const PLAN_TASKS_TOOL_NAME = 'plan_tasks'
+const CLAUDE_PLAN_STAGE_BUILTIN_TOOLS = ['Read', 'Grep', 'Glob']
+const CLAUDE_PLAN_STAGE_AGENTHUB_TOOLS = new Set([
+  PLAN_TASKS_TOOL_NAME,
+  'ask_user',
+  'fs_list',
+  'read_artifact',
+  'read_attachment',
+])
 
 type CanUseToolFn = NonNullable<Options['canUseTool']>
 type PermissionResult = Awaited<ReturnType<CanUseToolFn>>
@@ -92,6 +103,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     let nextPartIndex = 0
     let activeTextPartIndex = -1 // -1 表示当前没有开放的 text part
     const toolCallIdByUseId = new Map<string, string>()
+    const toolInputByUseId = new Map<string, Record<string, unknown>>()
     // 同步记录 tool name —— 让 tool_result 阶段能判断「这个结果是 write_artifact 来的，要 yield artifact.create」
     const toolNameByUseId = new Map<string, string>()
 
@@ -102,11 +114,72 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       runId: input.runId,
       abortSignal: signal,
     }
-    const agenthubMcpServer = createSdkMcpServer({
-      name: 'agenthub',
-      version: '1.0.0',
-      instructions: '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片 / PPT / Mermaid 图），流程、架构、时序、依赖关系优先用 type="diagram" 且 content 为 { syntax: "mermaid", source }；Mermaid 图会在写入时做预检，中文/数学/括号等 label 写成 A["..."]，不要传 ```mermaid fence，若工具返回 Invalid Mermaid diagram 必须修正 source 后重试；PPT 优先使用 semantic blocks（heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer），不要在 PPT JSON 中嵌入 base64/data URI 大资产；用 read_artifact 读其他 Agent 的产物，用 fs_list 查看 AgentHub workspace 目录，用 deploy_artifact 为 web_app artifact 生成本地预览路径，用 deploy_workspace 为当前 workspace 内 dist/build/out 等静态目录生成部署卡。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。部署工具返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
-      tools: [
+    const isPlanStage = input.toolNames.includes(PLAN_TASKS_TOOL_NAME)
+    const mcpTools = [
+        tool(
+          PLAN_TASKS_TOOL_NAME,
+          'Create the AgentHub Orchestrator dispatch plan. Call this exactly once when the plan is ready; AgentHub will stop the planning stage and execute the plan after user review.',
+          {
+            reasoning: z.string(),
+            tasks: z
+              .array(
+                z.object({
+                  id: z.string(),
+                  agentId: z.string(),
+                  task: z.string(),
+                  taskKind: z.enum(['code', 'test', 'review', 'design', 'doc', 'analysis']).optional(),
+                  dependsOn: z.array(z.string()).optional(),
+                  expectedOutputs: z
+                    .array(
+                      z.object({
+                        id: z.string(),
+                        type: z.enum(['web_app', 'document', 'image', 'ppt', 'project']),
+                        required: z.boolean().optional(),
+                        description: z.string().optional(),
+                      }),
+                    )
+                    .optional(),
+                  inputs: z
+                    .array(
+                      z.object({
+                        fromTaskId: z.string(),
+                        outputId: z.string(),
+                        required: z.boolean().optional(),
+                        description: z.string().optional(),
+                      }),
+                    )
+                    .optional(),
+                  acceptanceCriteria: z.array(z.string()).optional(),
+                  targetPaths: z.array(z.string()).optional(),
+                  expectedWorkspaceChanges: z.array(z.string()).optional(),
+                  requiredCommands: z
+                    .array(
+                      z.object({
+                        command: z.string(),
+                        description: z.string().optional(),
+                        cwd: z.string().optional(),
+                        timeoutMs: z.number().int().positive().optional(),
+                      }),
+                    )
+                    .optional(),
+                  requiredEvidence: z.array(z.string()).optional(),
+                }),
+              )
+              .min(1),
+          },
+          async (args) => {
+            const result = await toolRegistry.execute(PLAN_TASKS_TOOL_NAME, args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result.value) }],
+            }
+          },
+        ),
         tool(
           'write_artifact',
           'Create a previewable artifact (web_app / document / image / ppt / diagram) in the current conversation, or a new version of an existing one (pass parentArtifactId; version auto-increments). For diagram, pass content { syntax: "mermaid", source: "flowchart TD..." }; quote labels containing Chinese/math/symbols as A["..."], omit Markdown fences, and retry with corrected source if validation returns Invalid Mermaid diagram. For ppt, prefer structured slides with semantic blocks: heading, paragraph, bullets, metric, quote, timeline, columns, callout, divider, spacer. Do not embed raw base64/data URI assets in ppt JSON. Use outputKey when a dispatched task declares an expected output id. Use this for content that should be previewed in a card — NOT for files in the workspace.',
@@ -138,6 +211,31 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
           { artifactId: z.string() },
           async (args) => {
             const result = await toolRegistry.execute('read_artifact', args, toolCtx)
+            if (!result.ok) {
+              return {
+                content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
+                isError: true,
+              }
+            }
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    typeof result.value === 'string'
+                      ? result.value
+                      : JSON.stringify(result.value),
+                },
+              ],
+            }
+          },
+        ),
+        tool(
+          'read_attachment',
+          'Read a user-uploaded attachment in the current conversation by attachmentId. Use this when planning depends on uploaded file contents.',
+          { attachmentId: z.string() },
+          async (args) => {
+            const result = await toolRegistry.execute('read_attachment', args, toolCtx)
             if (!result.ok) {
               return {
                 content: [{ type: 'text' as const, text: `Error: ${result.error}` }],
@@ -308,7 +406,14 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
             }
           },
         ),
-      ],
+      ]
+    const agenthubMcpServer = createSdkMcpServer({
+      name: 'agenthub',
+      version: '1.0.0',
+      instructions: isPlanStage
+        ? 'AgentHub Orchestrator planning tools: inspect context with fs_list/read_artifact/read_attachment when needed, ask finite blocking questions with ask_user, then call plan_tasks exactly once. Do not write files, run commands, deploy, or complete child work in the planning stage.'
+        : '内置 AgentHub 工具：用 write_artifact 创建可预览产物（网页 / 文档 / 图片 / PPT / Mermaid 图），流程、架构、时序、依赖关系优先用 type="diagram" 且 content 为 { syntax: "mermaid", source }；Mermaid 图会在写入时做预检，中文/数学/括号等 label 写成 A["..."]，不要传 ```mermaid fence，若工具返回 Invalid Mermaid diagram 必须修正 source 后重试；PPT 优先使用 semantic blocks（heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer），不要在 PPT JSON 中嵌入 base64/data URI 大资产；用 read_artifact 读其他 Agent 的产物，用 fs_list 查看 AgentHub workspace 目录，用 deploy_artifact 为 web_app artifact 生成本地预览路径，用 deploy_workspace 为当前 workspace 内 dist/build/out 等静态目录生成部署卡。需要用户在有限方案中选择时，用 ask_user 发起结构化问答，不要只在普通文本里提问。被分派为子任务时，结束前必须调用 report_task_result 上报真实任务结果。部署工具返回的 previewPath 是当前 AgentHub 实例下的相对路径；不要把它改写成公网域名或自造完整 URL，面向用户时让用户点击部署卡片按钮或原样引用 previewPath。',
+      tools: filterAgentHubMcpToolsForRun(input.toolNames, mcpTools),
     })
 
     // 同一 conversation 的多轮 query 共享 session（resume）—— 否则每轮都是新对话上下文，
@@ -324,7 +429,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         preset: 'claude_code',
         append: input.systemPrompt,
       },
-      tools: { type: 'preset', preset: 'claude_code' },
+      tools: isPlanStage ? CLAUDE_PLAN_STAGE_BUILTIN_TOOLS : { type: 'preset', preset: 'claude_code' },
       // 禁用 SDK 内置 AskUserQuestion —— 我们用统一的 mcp__agenthub__ask_user 提供等价 UI
       disallowedTools: ['AskUserQuestion'],
       mcpServers: { agenthub: agenthubMcpServer },
@@ -388,6 +493,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               const callId = newToolCallId()
               toolCallIdByUseId.set(block.id, callId)
               toolNameByUseId.set(block.id, block.name)
+              toolInputByUseId.set(block.id, block.input ?? {})
               yield baseEvent({
                 type: 'tool.call' as const,
                 messageId,
@@ -435,6 +541,10 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               // 检测 agenthub MCP write_artifact 的成功结果 → 取出 artifact 并 yield artifact.create
               // 让 AgentRunner.consumeStream 给当前 message 注入 artifact_ref part（产物卡片）
               const toolName = toolNameByUseId.get(block.tool_use_id) ?? ''
+              if (!block.is_error && FS_WRITE_TOOLS.has(toolName)) {
+                recordClaudeSdkFileWrite(input.runId, workspace, toolInputByUseId.get(block.tool_use_id))
+              }
+
               if (
                 !block.is_error &&
                 (toolName === 'mcp__agenthub__write_artifact' ||
@@ -547,6 +657,51 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
     yield baseEvent({ type: 'message.end' as const, messageId }) as StreamEvent
   }
+}
+
+export function filterAgentHubMcpToolsForRun<T extends { name: string }>(
+  toolNames: readonly string[],
+  tools: readonly T[],
+): T[] {
+  const isPlanStage = toolNames.includes(PLAN_TASKS_TOOL_NAME)
+  if (!isPlanStage) {
+    return tools.filter((entry) => getSdkMcpToolName(entry) !== PLAN_TASKS_TOOL_NAME)
+  }
+  return tools.filter((entry) => CLAUDE_PLAN_STAGE_AGENTHUB_TOOLS.has(getSdkMcpToolName(entry)))
+}
+
+function getSdkMcpToolName(entry: { name?: string }): string {
+  return entry.name ?? ''
+}
+
+function recordClaudeSdkFileWrite(
+  runId: string,
+  workspace: WorkspaceRow,
+  toolInput: Record<string, unknown> | undefined,
+): void {
+  const target = (toolInput?.file_path as string | undefined) ?? (toolInput?.path as string | undefined)
+  if (!target) return
+
+  let absolutePath: string
+  try {
+    absolutePath = assertPathWithinWorkspace(workspace, target)
+  } catch {
+    return
+  }
+
+  let bytes = 0
+  try {
+    bytes = statSync(absolutePath).size
+  } catch {
+    bytes = Buffer.byteLength(readIfExists(workspace, target) ?? '', 'utf8')
+  }
+
+  recordRunFileWrite(runId, {
+    path: target,
+    absolutePath,
+    bytes,
+    applied: 'auto',
+  })
 }
 
 // ─── canUseTool 桥 ────────────────────────────────────────

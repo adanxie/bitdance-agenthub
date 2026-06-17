@@ -1,8 +1,8 @@
 # Spec 04 — Artifacts
 
-> Artifact 是 Agent 产出的「可独立预览的产物」：网页 / 代码 / 文档 / 图片 / PPT；历史 `diff` 产物仅做只读兼容。**与 Message 解耦**，有独立的生命周期、版本、二次编辑。**修改 ArtifactContent 结构需先讨论。**
+> Artifact 是 Agent 产出的「可独立预览的产物」：网页 / 代码 / 文档 / 图片 / PPT / 项目；历史 `diff` 产物仅做只读兼容。**与 Message 解耦**，有独立的生命周期、版本、二次编辑。**修改 ArtifactContent 结构需先讨论。**
 
-源文件：`src/shared/types.ts`、`src/db/schema.ts`、`src/server/artifact-service.ts`、`src/server/deployment-service.ts`、`src/components/artifact-preview-panel.tsx`、`src/server/tools/write-artifact.ts`、`src/server/tools/deploy-artifact.ts`
+源文件：`src/shared/types.ts`、`src/db/schema.ts`、`src/server/artifact-service.ts`、`src/server/deployment-service.ts`、`src/server/project-artifact.ts`、`src/components/artifact-preview-panel.tsx`、`src/server/tools/write-artifact.ts`、`src/server/tools/deploy-artifact.ts`
 
 ---
 
@@ -11,12 +11,12 @@
 1. **独立于 Message**（CLAUDE.md §3.5）：产物有自己的 DB 行，不内联在 message.parts 的字符串里
 2. **消息只持有引用** —— `artifact_ref` part 引用 artifactId（详见 Spec 03）
 3. **版本链 via parent**：v2 在 `parentArtifactId` 指向 v1，物理上是新一行
-4. **6 种 type 共享一张表**：用 `content: JSON` 列存可辨联合，按 `type` 字段分发
+4. **7 种 type 共享一张表**：用 `content: JSON` 列存可辨联合，按 `type` 字段分发
 5. **来源唯一**：Agent 通过 `write_artifact` 工具创建；不允许 Adapter / 前端直接写 artifacts 表
 
 ---
 
-## ArtifactContent 六种 type
+## ArtifactContent 七种 type
 
 源：`src/shared/types.ts:38-68`
 
@@ -28,6 +28,8 @@ type ArtifactContent =
   | { type: 'document'; format: 'markdown'; content: string }
   | { type: 'image'; url: string; alt: string; width?: number; height?: number }
   | { type: 'ppt'; title?: string; theme?: PptTheme; slides: PptSlide[] }
+  | { type: 'diagram'; syntax: 'mermaid'; source: string; theme?: MermaidTheme }
+  | { type: 'project'; files: { path: string; sizeBytes: number }[]; taskId?: string; agentId?: string }
   // PptSlide: { title?, subtitle?, bullets?: string[], blocks?: PptBlock[], notes?, layout? }
   // PptLayout: 'title'|'title-bullets'|'section'|'blank'|'content'|'two-column'|'metrics'|'timeline'|'quote'
   // PptBlock: heading | paragraph | bullets | metric | quote | timeline | columns | callout | divider | spacer
@@ -44,6 +46,8 @@ type ArtifactContent =
 | `diff` | **DB JSON 列**（hunks 列表 + 目标 artifactId） | 历史兼容：只读双栏预览，不再作为 Agent 新产物类型 | legacy/internal |
 | `code_file` | **仅 workspacePath 入 DB**，文件本身在 workspace 文件系统 | 大代码文件 / 多文件项目，面板可从 workspace 加载 | workspace/fs + 用户面板编辑 |
 | `ppt` | **DB JSON 列**（slides 数组：legacy title/bullets 或 semantic blocks） | 幻灯片，分页预览 + 导出真 .pptx | `write_artifact` |
+| `diagram` | **DB JSON 列**（Mermaid source） | 流程、架构、时序、依赖关系图，预览渲染 + 导出 .mmd | `write_artifact` |
+| `project` | **仅 files 清单入 DB**（path + sizeBytes），文件正文保留在 workspace | 多文件代码项目；面板按清单浏览 workspace 文件树，导出 ZIP 时再读磁盘 | AgentRunner 根据已应用的 `fs_write` evidence 自动创建 |
 
 **为什么 code_file 不入 DB**：代码文件可能 MB 级，塞 SQLite JSON 列会卡。改为 workspace 引用 + checksum 校验。`code_file` 当前由 workspace 文件读写路径承载，产物面板根据 `artifact.conversationId + content.workspacePath` 读取文件内容；用户在面板内保存时，先写回 workspace 文件，再创建一个新的 `code_file` 版本记录更新 size/checksum。
 
@@ -51,7 +55,7 @@ type ArtifactContent =
 
 ## MVP 限制
 
-`write_artifact` 工具当前 `type` 接：`'web_app' | 'document' | 'image' | 'ppt'`。`diff` 不再暴露给 Agent 作为新产物类型；产物差异由 ArtifactPreviewPanel 的版本对比功能从两条已存版本确定性生成。`code_file` 仍不由 LLM 直接创建，避免把大文件内容塞进 DB 或绕过 workspace 文件写入路径。
+`write_artifact` 工具当前 `type` 接：`'web_app' | 'document' | 'image' | 'ppt'`。`diff` 不再暴露给 Agent 作为新产物类型；产物差异由 ArtifactPreviewPanel 的版本对比功能从两条已存版本确定性生成。`code_file` 仍不由 LLM 直接创建，避免把大文件内容塞进 DB 或绕过 workspace 文件写入路径。`project` 也不暴露给 `write_artifact`，只由 AgentRunner 根据已应用的 `fs_write` evidence 自动创建。
 
 源码 `src/server/tools/write-artifact.ts:21`：
 ```typescript
@@ -226,6 +230,12 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `CodeFileView`：根据 `artifact.conversationId + content.workspacePath` 调 workspace read API 加载文件内容，提供「源码 / 编辑」视图。保存时走用户手动文件写入 API（不走 Agent fs_write 审批），随后通过 `POST /api/artifacts/:id/versions` 创建新的 `code_file` 版本，记录更新后的 `sizeBytes` 与 checksum。超出读取上限被截断的文件只允许查看，不允许保存。
 
+### project
+
+`ProjectView`：根据 `artifact.conversationId + content.files[].path` 调 workspace read API 懒加载文件内容，左侧按 `files` 清单构建只读文件树，右侧显示当前文件源码。`project` 正文不入 DB，版本快照只保存文件清单与来源字段（`taskId` / `agentId`）。顶部下载调用 `GET /api/artifacts/:id/export`，服务端在导出时从 workspace 读取仍存在且位于 effective cwd 内的文件并生成 ZIP。
+
+AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-run-evidence.fileWrites`，用 `absolutePath` 相对化到 workspace effective cwd，去重生成 `files` 清单；清单为空不创建 `project`。该产物不注入 message part，通过 `artifact.create` SSE 进入 store，产物库需要合并 store 中实时 artifact 才能即时显示。
+
 ### version compare
 
 当同一条版本链存在 2 个及以上版本时，`ArtifactPreviewPanel` 顶部显示「对比版本」入口。前端基于 `GET /api/artifacts/:id/versions` 返回的完整版本行，在客户端调用 `buildArtifactVersionDiff(oldContent, newContent)` 生成只读 diff section：
@@ -234,6 +244,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 - `web_app`：比较两版文件名并集，每个文件一个 diff section；新增/删除文件以空文本对比。
 - `ppt`：比较稳定排序后的 slides JSON。
 - `code_file`：只比较 DB 中的 workspace metadata（真实文件内容是 live workspace，不在 artifact 版本里保存快照）。
+- `project`：只比较 DB 中的文件清单 metadata（真实文件内容是 live workspace，不在 artifact 版本里保存快照）。
 - `image` / 跨类型 / 历史 `diff`：显示不支持确定性文本对比，不让 Agent 另造 diff artifact。
 
 ### diff (legacy)

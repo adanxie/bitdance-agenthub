@@ -34,6 +34,11 @@ The orchestration flow MUST produce a compiled and validated task plan before la
 - **THEN** the plan prompt tells the orchestrator to prefer agents with file/command tools
 - **AND** the plan should use `acceptanceCriteria` for local file and command outcomes instead of `expectedOutputs`.
 
+#### Scenario: Code task contract is normalized
+- **WHEN** the compiled plan contains a code implementation task
+- **THEN** AgentRunner ensures the task has a required `project` expected output
+- **AND** ensures the task has acceptance/evidence requirements for a successful runnable verification command.
+
 ### Requirement: Child tasks SHALL respect dependency order and semantic reports
 
 AgentRunner MUST execute dispatch tasks as a DAG and skip dependent tasks when prerequisites fail, required inputs cannot be resolved, or the child task does not report a successful semantic outcome.
@@ -60,6 +65,18 @@ AgentRunner MUST execute dispatch tasks as a DAG and skip dependent tasks when p
 - **AND** the report status is not `complete` or an acceptance result is missing/failed
 - **THEN** the dispatch task is treated as `failed`
 - **AND** dependent tasks are skipped.
+
+#### Scenario: Code task lacks runnable verification
+- **WHEN** a code implementation child task reports `complete`
+- **AND** recorded command evidence has no successful non-prepare build, compile, test, lint, or typecheck command
+- **THEN** the dispatch task is treated as `failed`
+- **AND** the existing retry or replan flow may remediate it.
+
+#### Scenario: Code task lacks project output
+- **WHEN** a code implementation child task reports `complete`
+- **AND** no required `project` output can be created and bound from workspace file writes
+- **THEN** the dispatch task is treated as `failed`
+- **AND** the existing retry or replan flow may remediate it.
 
 #### Scenario: Replan references a previous-round task
 - **WHEN** a remediation plan depends on a task id from an earlier dispatch round
